@@ -10,3 +10,13 @@
 
 ## Giảng viên hướng dẫn
 👨‍🏫 **PGS.TS. Trần Quang Đức**
+
+## Chọn ngôn ngữ để xây dựng tool
+
+Mục tiêu	Ngôn ngữ đề xuất
+Làm POC nghiên cứu nhanh, dễ demo	Python
+Viết tool mạnh có thể dùng trong thực tế / security product	C/C++ hoặc Rust
+Muốn build CLI đa nền tảng dễ dàng	Golang + C bindings
+Làm malware (educational only) hoặc bypass AV nâng cao	C/ASM hoặc mix
+
+--> Python hoặc C/C++
