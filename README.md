@@ -6,7 +6,7 @@
 - **Email:**  
   - 📧 **Cá nhân:** [sondinh99999@gmail.com](mailto:sondinh99999@gmail.com)  
   - 📧 **HUST-mail:** [son.dt210750@sis.hust.edu.vn](mailto:son.dt210750@sis.hust.edu.vn)  
-- **Tên đề tài:** *Xây dựng công cụ làm rối mã nguồn*  
+- **Tên đề tài:** *Xây dựng công cụ làm rối mã nguồn - Binary Obfucation Tool*  
 
 ## Giảng viên hướng dẫn
 👨‍🏫 **PGS.TS. Trần Quang Đức**
