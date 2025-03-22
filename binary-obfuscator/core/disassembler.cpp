@@ -4,6 +4,7 @@
 #include <iostream>
 #include <vector>
 #include <sstream>
+#include <filesystem>
 
 struct SectionInfo {
     uint32_t VirtualAddress;
@@ -76,9 +77,6 @@ int main(int argc, char** argv) {
     size_t text_size = textSection.Size;
     uintptr_t text_va = image_base + textSection.VirtualAddress;
 
-    std::cout << "Disassembling .text section at: 0x" << std::hex << text_va << "\n";
-    std::cout << "Entry Point: 0x" << std::hex << entry_addr << "\n";
-
     csh handle;
     cs_insn* insn;
     if (cs_open(CS_ARCH_X86, CS_MODE_64, &handle) != CS_ERR_OK) {
@@ -89,6 +87,8 @@ int main(int argc, char** argv) {
     size_t count = cs_disasm(handle, text_code, text_size, text_va, 0, &insn);
 
     std::ostringstream out;
+    out << "Disassembling .text section at: 0x" << std::hex << text_va << "\n";
+    out << "Entry Point: 0x" << std::hex << entry_addr << "\n";
     out << "[\n";
     for (size_t i = 0; i < count; i++) {
         out << "  {\n"
@@ -104,6 +104,20 @@ int main(int argc, char** argv) {
     cs_free(insn, count);
     cs_close(&handle);
 
-    std::cout << out.str();
+    // std::cout << out.str();
+
+    std::string filename = "data.txt";
+    std::filesystem::create_directories("../output");
+    std::string output_path = "../output/" + filename;
+    
+    std::ofstream fout(output_path);
+    if (!fout) {
+        std::cerr << "Failed to write output file!" << std::endl;
+        return 1;
+    }
+
+    fout << out.str();
+    fout.close();
+    std::cout << "[*] Disassembly saved to: " << output_path << "\n";
     return 0;
 }
