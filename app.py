@@ -1,16 +1,22 @@
-from flask import Flask, render_template, request, redirect, url_for, flash
 import os
+import platform
+from flask import Flask, render_template, request, redirect, url_for, flash
 from werkzeug.utils import secure_filename
 import subprocess
 
 app = Flask(__name__)
 app.secret_key = 'binary-obfucation-sondt'
 
-UPLOAD_FOLDER = os.path.join(os.getcwd(), 'test')
-ALLOWED_EXTENSIONS = {'bin', 'exe'}
+# Kiểm tra nếu đang chạy trên Vercel
+if os.getenv('VERCEL') or os.getenv('NOW_REGION'):
+    UPLOAD_FOLDER = '/tmp'
+else:
+    UPLOAD_FOLDER = os.path.join(os.getcwd(), 'test')
 
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024
+
+ALLOWED_EXTENSIONS = {'bin', 'exe'}
 
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
@@ -34,22 +40,22 @@ def upload_file():
             # Lấy tên file an toàn
             filename = secure_filename(file.filename)
             file_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+
+            # Đảm bảo thư mục tồn tại
+            os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
+
+            # Lưu file
             file.save(file_path)
 
-            # Đường dẫn tuyệt đối đến disassembler.exe
-            disassembler_path = os.path.abspath(os.path.join('core', 'disassembler.exe'))
-            relative_path_to_file = f"../test/{filename}"
+            # Đường dẫn đến disassembler
+            disassembler_path = os.path.abspath('./core/disassembler.exe')
+            relative_path_to_file = os.path.abspath(file_path)
 
-            # Kiểm tra sự tồn tại của disassembler.exe
-            if not os.path.isfile(disassembler_path):
-                flash('Không tìm thấy disassembler.exe trong thư mục core.')
-                return redirect(request.url)
-
-            # Chạy lệnh
+            # Chạy disassembler
             try:
                 subprocess.run(
                     [disassembler_path, relative_path_to_file],
-                    cwd=os.path.abspath('core'),
+                    cwd=os.path.abspath('./core'),
                     check=True
                 )
                 flash(f'Đã chạy thành công disassembler trên {filename}')
@@ -69,9 +75,5 @@ def upload_file():
             return redirect(request.url)
     return render_template('upload.html', result=result)
 
-
 if __name__ == '__main__':
-    # Tạo thư mục upload nếu chưa tồn tại
-    if not os.path.exists(app.config['UPLOAD_FOLDER']):
-        os.makedirs(app.config['UPLOAD_FOLDER'])
     app.run(debug=True)
