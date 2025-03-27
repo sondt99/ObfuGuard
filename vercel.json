@@ -1,18 +1,26 @@
 {
     "builds": [
-        {
-            "src": "app.py",
-            "use": "@vercel/python"
-        },
-        {
-            "src": "static/**",
-            "use": "@vercel/static"
+      {
+        "src": "build.sh",
+        "use": "@vercel/static-build",
+        "config": {
+          "command": "bash build.sh"
         }
+      },
+      {
+        "src": "app.py",
+        "use": "@vercel/python"
+      },
+      {
+        "src": "static/**",
+        "use": "@vercel/static"
+      }
     ],
     "routes": [
-        {
-            "src": "/(.*)",
-            "dest": "app.py"
-        }
+      {
+        "src": "/(.*)",
+        "dest": "app.py"
+      }
     ]
-}
+  }
+  
