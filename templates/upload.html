@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="vi">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Upload Binary</title>
+  <title>Upload Binary File</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>
@@ -26,7 +26,7 @@
     </form>
 
     {% if result %}
-      <h2>Disassembly Result:</h2>
+      <h2>Result:</h2>
       <pre class="result">{{ result }}</pre>
     {% endif %}
   </div>
