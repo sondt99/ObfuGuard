@@ -4,28 +4,31 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Upload Binary</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>
-  <h1>Upload Binary File</h1>
+  <div class="container">
+    <h1>Upload Binary File</h1>
 
-  {% with messages = get_flashed_messages() %}
-    {% if messages %}
-      <ul>
-        {% for message in messages %}
-          <li>{{ message }}</li>
-        {% endfor %}
-      </ul>
+    {% with messages = get_flashed_messages() %}
+      {% if messages %}
+        <ul class="messages">
+          {% for message in messages %}
+            <li>{{ message }}</li>
+          {% endfor %}
+        </ul>
+      {% endif %}
+    {% endwith %}
+
+    <form class="upload-form" action="{{ url_for('upload_file') }}" method="post" enctype="multipart/form-data">
+      <input type="file" name="file" required />
+      <button type="submit" class="btn">Upload</button>
+    </form>
+
+    {% if result %}
+      <h2>Disassembly Result:</h2>
+      <pre class="result">{{ result }}</pre>
     {% endif %}
-  {% endwith %}
-
-  <form action="{{ url_for('upload_file') }}" method="post" enctype="multipart/form-data">
-    <input type="file" name="file" required />
-    <input type="submit" value="Upload" />
-  </form>
-
-  {% if result %}
-    <h2>Disassembly Result:</h2>
-    <pre>{{ result }}</pre>
-  {% endif %}
+  </div>
 </body>
 </html>
