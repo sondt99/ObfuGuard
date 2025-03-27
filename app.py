@@ -6,15 +6,14 @@ import subprocess
 app = Flask(__name__)
 app.secret_key = 'binary-obfucation-sondt'
 
-# Cấu hình thư mục upload và giới hạn kích thước file (ví dụ 16MB)
-UPLOAD_FOLDER = os.path.join(os.getcwd(), 'test_binaries')
-ALLOWED_EXTENSIONS = {'bin', 'exe'}  # Các loại file cho phép upload
+# Sử dụng thư mục /tmp cho Vercel vì nó cho phép ghi dữ liệu tạm thời
+UPLOAD_FOLDER = os.path.join('/tmp', 'test')
+ALLOWED_EXTENSIONS = {'bin', 'exe'}
 
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
-app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB
+app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024
 
 def allowed_file(filename):
-    # Kiểm tra file có phần mở rộng hợp lệ không
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
 @app.route('/')
@@ -25,7 +24,6 @@ def home():
 def upload_file():
     result = None
     if request.method == 'POST':
-        # Kiểm tra xem có file nào được gửi kèm không
         if 'file' not in request.files:
             flash('Không có file nào trong yêu cầu.')
             return redirect(request.url)
@@ -34,21 +32,20 @@ def upload_file():
             flash('Không có file nào được chọn.')
             return redirect(request.url)
         if file and allowed_file(file.filename):
-            # Lấy tên file an toàn
             filename = secure_filename(file.filename)
             file_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
             file.save(file_path)
 
-            # Chạy disassembler.exe với file vừa upload
+            # Chạy disassembler - lưu ý: đảm bảo disassembler phù hợp với hệ điều hành của Vercel (Linux)
             try:
-                disassembler_path = os.path.join(os.getcwd(), 'core', 'disassembler.exe')
+                disassembler_path = os.path.join(os.getcwd(), 'core', 'disassembler')  # Nếu có phiên bản Linux, có thể bỏ .exe
                 subprocess.run([disassembler_path, file_path], check=True)
             except subprocess.CalledProcessError as e:
                 flash('Đã có lỗi xảy ra trong quá trình giải mã.')
                 return redirect(request.url)
 
-            # Đọc kết quả từ file output/data.txt
-            output_file = os.path.join(os.getcwd(), 'output', 'data.txt')
+            # Đọc kết quả từ file output/data.txt (nếu thư mục này có quyền ghi, hoặc bạn có thể chuyển nó sang /tmp)
+            output_file = os.path.join('/tmp', 'data.txt')
             if os.path.exists(output_file):
                 with open(output_file, 'r', encoding='utf-8') as f:
                     result = f.read()
@@ -60,7 +57,6 @@ def upload_file():
     return render_template('upload.html', result=result)
 
 if __name__ == '__main__':
-    # Tạo thư mục upload nếu chưa tồn tại
     if not os.path.exists(app.config['UPLOAD_FOLDER']):
         os.makedirs(app.config['UPLOAD_FOLDER'])
     app.run(debug=True)
