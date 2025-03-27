@@ -12,7 +12,7 @@
     "routes": [
         {
             "src": "/(.*)",
-            "dest": "app.py"
+            "dest": "web/app.py"
         }
     ]
 }
