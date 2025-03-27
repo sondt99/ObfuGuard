@@ -1,18 +1,12 @@
 import os
-import platform
+import subprocess
 from flask import Flask, render_template, request, redirect, url_for, flash
 from werkzeug.utils import secure_filename
-import subprocess
 
 app = Flask(__name__)
 app.secret_key = 'binary-obfucation-sondt'
 
-# Kiểm tra nếu đang chạy trên Vercel
-if os.getenv('VERCEL') or os.getenv('NOW_REGION'):
-    UPLOAD_FOLDER = '/tmp'
-else:
-    UPLOAD_FOLDER = os.path.join(os.getcwd(), 'test')
-
+UPLOAD_FOLDER = '/tmp' if os.getenv('VERCEL') else os.path.join(os.getcwd(), 'test')
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024
 
@@ -37,21 +31,15 @@ def upload_file():
             flash('Không có file nào được chọn.')
             return redirect(request.url)
         if file and allowed_file(file.filename):
-            # Lấy tên file an toàn
             filename = secure_filename(file.filename)
             file_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-
-            # Đảm bảo thư mục tồn tại
             os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
-
-            # Lưu file
             file.save(file_path)
 
-            # Đường dẫn đến disassembler
-            disassembler_path = os.path.abspath('./core/disassembler.exe')
+            # Chạy disassembler (Linux Binary)
+            disassembler_path = os.path.abspath('./core/disassembler')
             relative_path_to_file = os.path.abspath(file_path)
 
-            # Chạy disassembler
             try:
                 subprocess.run(
                     [disassembler_path, relative_path_to_file],
