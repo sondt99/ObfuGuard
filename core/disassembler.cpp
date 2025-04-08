@@ -49,6 +49,8 @@ uintptr_t get_entry_point_rva(const std::vector<uint8_t>& code) {
 }
 
 int main(int argc, char** argv) {
+    std::cout << "Disassembler v1.0.0\n";
+    std::cout << "Author: sondt\n";
     if (argc < 2) {
         std::cerr << "Usage: " << argv[0] << " <exe_file>" << std::endl;
         return 1;
