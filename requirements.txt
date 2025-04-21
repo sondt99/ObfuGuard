@@ -3,5 +3,5 @@ keystone-engine
 capstone
 flask
 jinja2
-requests>=2.25.1
-urllib3==1.26.6
+requests
+urllib3
