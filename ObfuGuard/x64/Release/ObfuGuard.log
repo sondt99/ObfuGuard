@@ -1,0 +1,81 @@
+﻿  cfflattener.cpp
+E:\ObfuGuard\ObfuGuard\obfuscator\obfuscator.h(73,9): warning C4240: nonstandard extension used: access to 'obfuscator::instruction_t' now defined to be 'public', previously it was defined to be 'private'
+  (compiling source file 'cfflattener/cfflattener.cpp')
+      E:\ObfuGuard\ObfuGuard\obfuscator\obfuscator.h(15,9):
+      see declaration of 'obfuscator::instruction_t'
+  
+E:\ObfuGuard\ObfuGuard\obfuscator\obfuscator.h(102,9): warning C4240: nonstandard extension used: access to 'obfuscator::function_t' now defined to be 'public', previously it was defined to be 'private'
+  (compiling source file 'cfflattener/cfflattener.cpp')
+      E:\ObfuGuard\ObfuGuard\obfuscator\obfuscator.h(16,9):
+      see declaration of 'obfuscator::function_t'
+  
+  func2rva.cpp
+  main.cpp
+E:\ObfuGuard\ObfuGuard\obfuscator\obfuscator.h(73,9): warning C4240: nonstandard extension used: access to 'obfuscator::instruction_t' now defined to be 'public', previously it was defined to be 'private'
+  (compiling source file 'main.cpp')
+      E:\ObfuGuard\ObfuGuard\obfuscator\obfuscator.h(15,9):
+      see declaration of 'obfuscator::instruction_t'
+  
+E:\ObfuGuard\ObfuGuard\obfuscator\obfuscator.h(102,9): warning C4240: nonstandard extension used: access to 'obfuscator::function_t' now defined to be 'public', previously it was defined to be 'private'
+  (compiling source file 'main.cpp')
+      E:\ObfuGuard\ObfuGuard\obfuscator\obfuscator.h(16,9):
+      see declaration of 'obfuscator::function_t'
+  
+  obfuscator.cpp
+E:\ObfuGuard\ObfuGuard\obfuscator\obfuscator.h(73,9): warning C4240: nonstandard extension used: access to 'obfuscator::instruction_t' now defined to be 'public', previously it was defined to be 'private'
+  (compiling source file 'obfuscator/obfuscator.cpp')
+      E:\ObfuGuard\ObfuGuard\obfuscator\obfuscator.h(15,9):
+      see declaration of 'obfuscator::instruction_t'
+  
+E:\ObfuGuard\ObfuGuard\obfuscator\obfuscator.h(102,9): warning C4240: nonstandard extension used: access to 'obfuscator::function_t' now defined to be 'public', previously it was defined to be 'private'
+  (compiling source file 'obfuscator/obfuscator.cpp')
+      E:\ObfuGuard\ObfuGuard\obfuscator\obfuscator.h(16,9):
+      see declaration of 'obfuscator::function_t'
+  
+E:\ObfuGuard\ObfuGuard\obfuscator\obfuscator.cpp(79,75): warning C4244: '=': conversion from 'uint64_t' to 'int', possible loss of data
+E:\ObfuGuard\ObfuGuard\obfuscator\obfuscator.cpp(331,25): warning C4244: 'initializing': conversion from 'uint64_t' to 'int', possible loss of data
+E:\ObfuGuard\ObfuGuard\obfuscator\obfuscator.cpp(371,25): warning C4244: 'initializing': conversion from 'uint64_t' to 'int', possible loss of data
+E:\ObfuGuard\ObfuGuard\obfuscator\obfuscator.cpp(380,25): warning C4244: 'initializing': conversion from 'uint64_t' to 'int', possible loss of data
+E:\ObfuGuard\ObfuGuard\obfuscator\obfuscator.cpp(536,17): warning C4244: 'initializing': conversion from 'uint64_t' to 'uint32_t', possible loss of data
+E:\ObfuGuard\ObfuGuard\obfuscator\obfuscator.cpp(541,22): warning C4018: '<': signed/unsigned mismatch
+E:\ObfuGuard\ObfuGuard\obfuscator\obfuscator.cpp(556,169): warning C4244: '=': conversion from 'ULONGLONG' to 'uint32_t', possible loss of data
+E:\ObfuGuard\ObfuGuard\obfuscator\obfuscator.cpp(561,9): warning C4477: 'printf' : format string '%i' requires an argument of type 'int', but variadic argument 1 has type 'unsigned __int64'
+      E:\ObfuGuard\ObfuGuard\obfuscator\obfuscator.cpp(561,9):
+      consider using '%zi' in the format string
+  
+  pdbparser.cpp
+  pe.cpp
+  junkcode.cpp
+D:\vcpkg\installed\x64-windows\include\LIEF\ELF\Parser.hpp(56,54): warning C4267: 'initializing': conversion from 'size_t' to 'const uint32_t', possible loss of data
+  (compiling source file 'junkcode/junkcode.cpp')
+  
+D:\vcpkg\installed\x64-windows\include\LIEF\ELF\Section.hpp(60,48): warning C4267: 'initializing': conversion from 'size_t' to 'const uint32_t', possible loss of data
+  (compiling source file 'junkcode/junkcode.cpp')
+  
+D:\vcpkg\installed\x64-windows\include\LIEF\ELF\GnuHash.hpp(60,25): warning C4267: 'return': conversion from 'size_t' to 'uint32_t', possible loss of data
+  (compiling source file 'junkcode/junkcode.cpp')
+  
+D:\vcpkg\installed\x64-windows\include\LIEF\ELF\GnuHash.hpp(77,31): warning C4267: 'return': conversion from 'size_t' to 'uint32_t', possible loss of data
+  (compiling source file 'junkcode/junkcode.cpp')
+  
+D:\vcpkg\installed\x64-windows\include\LIEF\ELF\SysvHash.hpp(56,25): warning C4267: 'return': conversion from 'size_t' to 'uint32_t', possible loss of data
+  (compiling source file 'junkcode/junkcode.cpp')
+  
+D:\vcpkg\installed\x64-windows\include\LIEF\ELF\SysvHash.hpp(61,24): warning C4267: 'return': conversion from 'size_t' to 'uint32_t', possible loss of data
+  (compiling source file 'junkcode/junkcode.cpp')
+  
+D:\vcpkg\installed\x64-windows\include\LIEF\PE\ResourcesManager.hpp(72,15): warning C4267: 'return': conversion from 'size_t' to 'uint32_t', possible loss of data
+  (compiling source file 'junkcode/junkcode.cpp')
+  
+D:\vcpkg\installed\x64-windows\include\LIEF\PE\LoadConfigurations\LoadConfiguration.hpp(178,12): warning C4244: 'return': conversion from 'const uint64_t' to 'uint32_t', possible loss of data
+  (compiling source file 'junkcode/junkcode.cpp')
+  
+E:\ObfuGuard\ObfuGuard\junkcode\junkcode.cpp(216,51): warning C4244: 'initializing': conversion from 'const int64_t' to 'int32_t', possible loss of data
+E:\ObfuGuard\ObfuGuard\junkcode\junkcode.cpp(238,47): warning C4244: 'initializing': conversion from 'const int64_t' to 'int32_t', possible loss of data
+  Generating code
+  Previous IPDB not found, fall back to full compilation.
+  All 2733 functions were compiled because no usable IPDB/IOBJ from previous compilation was found.
+  Finished generating code
+  ObfuGuard.vcxproj -> E:\ObfuGuard\x64\Release\ObfuGuard-con.exe
+  'pwsh.exe' is not recognized as an internal or external command,
+  operable program or batch file.

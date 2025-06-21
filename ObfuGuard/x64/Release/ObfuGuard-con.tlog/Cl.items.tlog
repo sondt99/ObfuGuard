@@ -1,0 +1,7 @@
+E:\ObfuGuard\ObfuGuard\cfflattener\cfflattener.cpp;E:\ObfuGuard\ObfuGuard\x64\Release\cfflattener.obj
+E:\ObfuGuard\ObfuGuard\func2rva\func2rva.cpp;E:\ObfuGuard\ObfuGuard\x64\Release\func2rva.obj
+E:\ObfuGuard\ObfuGuard\main.cpp;E:\ObfuGuard\ObfuGuard\x64\Release\main.obj
+E:\ObfuGuard\ObfuGuard\obfuscator\obfuscator.cpp;E:\ObfuGuard\ObfuGuard\x64\Release\obfuscator.obj
+E:\ObfuGuard\ObfuGuard\pdbparser\pdbparser.cpp;E:\ObfuGuard\ObfuGuard\x64\Release\pdbparser.obj
+E:\ObfuGuard\ObfuGuard\pe\pe.cpp;E:\ObfuGuard\ObfuGuard\x64\Release\pe.obj
+E:\ObfuGuard\ObfuGuard\junkcode\junkcode.cpp;E:\ObfuGuard\ObfuGuard\x64\Release\junkcode.obj
