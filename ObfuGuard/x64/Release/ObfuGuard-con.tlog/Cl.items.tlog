@@ -1,7 +1,7 @@
-E:\ObfuGuard\ObfuGuard\cfflattener\cfflattener.cpp;E:\ObfuGuard\ObfuGuard\x64\Release\cfflattener.obj
-E:\ObfuGuard\ObfuGuard\func2rva\func2rva.cpp;E:\ObfuGuard\ObfuGuard\x64\Release\func2rva.obj
-E:\ObfuGuard\ObfuGuard\main.cpp;E:\ObfuGuard\ObfuGuard\x64\Release\main.obj
-E:\ObfuGuard\ObfuGuard\obfuscator\obfuscator.cpp;E:\ObfuGuard\ObfuGuard\x64\Release\obfuscator.obj
-E:\ObfuGuard\ObfuGuard\pdbparser\pdbparser.cpp;E:\ObfuGuard\ObfuGuard\x64\Release\pdbparser.obj
-E:\ObfuGuard\ObfuGuard\pe\pe.cpp;E:\ObfuGuard\ObfuGuard\x64\Release\pe.obj
-E:\ObfuGuard\ObfuGuard\junkcode\junkcode.cpp;E:\ObfuGuard\ObfuGuard\x64\Release\junkcode.obj
+E:\Graduation-Thesis-HUST\ObfuGuard\cfflattener\cfflattener.cpp;E:\Graduation-Thesis-HUST\ObfuGuard\x64\Release\cfflattener.obj
+E:\Graduation-Thesis-HUST\ObfuGuard\func2rva\func2rva.cpp;E:\Graduation-Thesis-HUST\ObfuGuard\x64\Release\func2rva.obj
+E:\Graduation-Thesis-HUST\ObfuGuard\main.cpp;E:\Graduation-Thesis-HUST\ObfuGuard\x64\Release\main.obj
+E:\Graduation-Thesis-HUST\ObfuGuard\obfuscatecff\obfuscatecff.cpp;E:\Graduation-Thesis-HUST\ObfuGuard\x64\Release\obfuscatecff.obj
+E:\Graduation-Thesis-HUST\ObfuGuard\pdbparser\pdbparser.cpp;E:\Graduation-Thesis-HUST\ObfuGuard\x64\Release\pdbparser.obj
+E:\Graduation-Thesis-HUST\ObfuGuard\pe\pe.cpp;E:\Graduation-Thesis-HUST\ObfuGuard\x64\Release\pe.obj
+E:\Graduation-Thesis-HUST\ObfuGuard\junkcode\junkcode.cpp;E:\Graduation-Thesis-HUST\ObfuGuard\x64\Release\junkcode.obj
