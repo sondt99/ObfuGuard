@@ -12,17 +12,17 @@
 #include <capstone/capstone.h>
 #include <keystone/keystone.h>
 
-// Constructor/Destructor
+// Hàm khởi tạo/Hàm huỷ
 TrampolineInjector::TrampolineInjector() : binary(nullptr), image_base(0), is_64_bit(false) {
-    // Initialize random seed for junk code generation
+    // thiết lập biến ban đầu và seed cho random
     srand(static_cast<unsigned int>(time(nullptr)));
 }
 
 TrampolineInjector::~TrampolineInjector() {
-    //binary_ptr auto clean
+    // binary_ptr clean
 }
 
-// Helper function to print byte vectors for debugging
+// In ra mảng byte để debug
 void TrampolineInjector::print_bytes(const std::string& prefix, const std::vector<uint8_t>& bytes) {
     std::cout << prefix;
     std::cout << std::hex << std::setfill('0');
@@ -32,6 +32,7 @@ void TrampolineInjector::print_bytes(const std::string& prefix, const std::vecto
     std::cout << std::dec << std::endl;
 }
 
+// Nạp file PE
 bool TrampolineInjector::load_pe(const std::string& pe_path) {
     binary_ptr = LIEF::PE::Parser::parse(pe_path);
     if (!binary_ptr) {
@@ -42,17 +43,12 @@ bool TrampolineInjector::load_pe(const std::string& pe_path) {
     binary = binary_ptr.get();
     image_base = binary->imagebase();
 
-    // Detect if 64-bit
     is_64_bit = (binary->header().machine() == LIEF::PE::Header::MACHINE_TYPES::AMD64);
-
-    /*std::cout << "Loaded PE: " << pe_path << std::endl;
-    std::cout << "Image Base: 0x" << std::hex << image_base << std::endl;
-    std::cout << "Architecture: " << (is_64_bit ? "64-bit" : "32-bit") << std::dec << std::endl;*/
 
     return true;
 }
 
-// NEW: Get current section count
+// Lấy số lượng section hiện tại có trong PE
 uint32_t TrampolineInjector::get_current_section_count() const {
     if (!binary) {
         return 0;
@@ -60,27 +56,27 @@ uint32_t TrampolineInjector::get_current_section_count() const {
     return static_cast<uint32_t>(binary->sections().size());
 }
 
-// NEW: Calculate maximum injectable functions based on PE section limits
+// Tính toán số hàm tối đa có thể chèn thêm dựa vào giới hạn section
 uint32_t TrampolineInjector::calculate_max_injectable_functions() const {
     if (!binary) {
         return 0;
     }
 
-    const uint32_t PE_MAX_SECTIONS = 96;        // Theoretical PE limit
-    const uint32_t SAFETY_MARGIN = 10;         // Safety margin for stability
-    const uint32_t RESERVED_FOR_SYSTEM = 5;    // Reserve some sections for system use
+    const uint32_t PE_MAX_SECTIONS = 96;        
+    const uint32_t SAFETY_MARGIN = 10;        
+    const uint32_t RESERVED_FOR_SYSTEM = 5;    
 
     uint32_t current_sections = get_current_section_count();
     uint32_t max_usable_sections = PE_MAX_SECTIONS - SAFETY_MARGIN - RESERVED_FOR_SYSTEM;
 
     if (current_sections >= max_usable_sections) {
-        return 0; // Already at or over limit
+		return 0; // Không thể chèn thêm hàm nào nếu đã đạt giới hạn
     }
 
     return max_usable_sections - current_sections;
 }
 
-// NEW: Check if we can safely inject the planned number of functions
+// Kiểm tra xem có thể chèn thêm bao nhiêu hàm mà không vượt quá giới hạn
 bool TrampolineInjector::check_section_limit_before_injection(uint32_t planned_injections) const {
     uint32_t max_injectable = calculate_max_injectable_functions();
 
@@ -98,6 +94,7 @@ bool TrampolineInjector::check_section_limit_before_injection(uint32_t planned_i
     }
 }
 
+// Lấy mã gốc của hàm và di chuyển đến vị trí mới
 bool TrampolineInjector::get_and_relocate_original_function_code(
     uint64_t original_func_va,
     uint64_t new_func_base_va,
@@ -109,6 +106,7 @@ bool TrampolineInjector::get_and_relocate_original_function_code(
 
     const LIEF::PE::Section* original_section = nullptr;
 
+	// Kiểm tra xem địa chỉ VA có hợp lệ không
     /*std::cout << "Info: Searching for section containing VA 0x" << std::hex << original_func_va << std::dec << std::endl;*/
     for (const LIEF::PE::Section& sec : binary->sections()) {
         uint64_t sec_va_start = image_base + sec.virtual_address();
@@ -119,14 +117,16 @@ bool TrampolineInjector::get_and_relocate_original_function_code(
         }
     }
 
+	// Nếu không tìm thấy section chứa địa chỉ VA, báo lỗi
     if (!original_section) {
         std::cerr << "Error: Could not find section containing original function VA: 0x" << std::hex << original_func_va << std::endl;
         return false;
     }
     /*std::cout << "Found section '" << original_section->name() << "' for VA 0x" << std::hex << original_func_va << std::dec << std::endl;*/
 
-    uint64_t section_base_va = image_base + original_section->virtual_address();
-    uint64_t offset_in_section = original_func_va - section_base_va;
+
+	uint64_t section_base_va = image_base + original_section->virtual_address(); // Tính toán địa chỉ VA bắt đầu của section
+	uint64_t offset_in_section = original_func_va - section_base_va; // Tính toán offset của hàm trong section
 
     uint64_t max_read_size = 0;
     uint64_t section_content_limit = original_section->size();
@@ -140,23 +140,27 @@ bool TrampolineInjector::get_and_relocate_original_function_code(
         return false;
     }
 
+	// Kiểm tra xem kích thước đọc tối đa có hợp lệ không
     if (max_read_size == 0) {
         std::cerr << "Error: Max read size is 0 for VA 0x" << std::hex << original_func_va << " in section " << original_section->name() << std::endl;
         return false;
     }
 
+    // Đọc bytes thô từ địa chỉ ảo của hàm gốc trong file PE
     LIEF::span<const uint8_t> function_raw_bytes_span = binary->get_content_from_virtual_address(original_func_va, static_cast<uint32_t>(max_read_size));
     if (function_raw_bytes_span.empty()) {
         std::cerr << "Error: Could not read content from original function VA: 0x" << std::hex << original_func_va << std::endl;
         return false;
     }
 
-    csh cs_handle;
+	csh cs_handle; // Xử lý capstone
+
     cs_mode capstone_mode = is_64_bit ? CS_MODE_64 : CS_MODE_32;
     if (cs_open(CS_ARCH_X86, capstone_mode, &cs_handle) != CS_ERR_OK) {
         std::cerr << "Error: Failed to initialize Capstone." << std::endl;
         return false;
     }
+	// Bật chế độ chi tiết để lấy thông tin về các toán hạng
     cs_option(cs_handle, CS_OPT_DETAIL, CS_OPT_ON);
 
     cs_insn* insn;
@@ -166,13 +170,15 @@ bool TrampolineInjector::get_and_relocate_original_function_code(
     const size_t MAX_FUNC_SCAN_SIZE = 8192;
     const uint8_t* code_ptr = function_raw_bytes_span.data();
     size_t code_available_size = function_raw_bytes_span.size();
+    
 
+	// Giới hạn kích thước quét mã để tránh tràn bộ nhớ
     while (current_copied_offset < code_available_size && relocated_code_buffer.size() < MAX_FUNC_SCAN_SIZE) {
         count = cs_disasm(cs_handle, code_ptr + current_copied_offset, code_available_size - current_copied_offset, original_func_va + current_copied_offset, 1, &insn);
         if (count > 0) {
             std::vector<uint8_t> instr_bytes(insn[0].bytes, insn[0].bytes + insn[0].size);
 
-            // Handle CALL and JMP relocation
+			// xử lý các lệnh CALL và JMP
             if (insn[0].id == X86_INS_CALL || insn[0].id == X86_INS_JMP) {
                 if (insn[0].detail->x86.op_count == 1) {
                     const cs_x86_op* op = &(insn[0].detail->x86.operands[0]);
@@ -230,7 +236,8 @@ bool TrampolineInjector::get_and_relocate_original_function_code(
                     }
                 }
             }
-            // Handle other RIP-relative operands
+            
+			// Xử lý các toán hạng RIP-relative trong các lệnh khác
             else if (is_64_bit) {
                 for (uint8_t i = 0; i < insn[0].detail->x86.op_count; ++i) {
                     const cs_x86_op* op = &(insn[0].detail->x86.operands[i]);
@@ -256,6 +263,7 @@ bool TrampolineInjector::get_and_relocate_original_function_code(
                 }
             }
 
+			// Thêm mã lệnh đã xử lý vào bộ đệm
             relocated_code_buffer.insert(relocated_code_buffer.end(), instr_bytes.begin(), instr_bytes.end());
             current_copied_offset += insn[0].size;
 
@@ -265,7 +273,7 @@ bool TrampolineInjector::get_and_relocate_original_function_code(
                 break;
             }
 
-            cs_free(insn, count);
+			cs_free(insn, count); // Giải phóng bộ nhớ của lệnh đã xử lý
         }
         else {
             std::cerr << "Warning: Capstone disassembly failed at VA 0x" << std::hex << (original_func_va + current_copied_offset)
@@ -274,22 +282,26 @@ bool TrampolineInjector::get_and_relocate_original_function_code(
         }
     }
 
-    cs_close(&cs_handle);
+	cs_close(&cs_handle); // Đóng Capstone engine
 
+	// Kiểm tra xem có mã nào được di chuyển không
     if (relocated_code_buffer.empty()) {
         std::cerr << "Error: Could not disassemble any instruction from original function." << std::endl;
         return false;
     }
 
+	// In ra mã đã di chuyển để debug
     if (!ret_found) {
         std::cout << "Warning: No RET instruction found within scan limit. Appending RET (0xC3)." << std::endl;
         relocated_code_buffer.push_back(0xC3);
     }
 
+	// In ra mã đã di chuyển
     determined_original_function_size = current_copied_offset;
     return true;
 }
 
+// Tạo section mới với tên và kích thước khởi tạo
 bool TrampolineInjector::create_new_section(const std::string& section_name, uint32_t initial_size) {
     LIEF::PE::Section new_section_obj(section_name);
     new_section_obj.add_characteristic(LIEF::PE::Section::CHARACTERISTICS::MEM_EXECUTE);
@@ -303,19 +315,19 @@ bool TrampolineInjector::create_new_section(const std::string& section_name, uin
     return (new_section_ptr != nullptr);
 }
 
-// Enhanced junk instruction generator with more sophisticated patterns
+// Tạo 1 chuỗi lệnh ASM không ảnh hưởng logic (junk) để chèn vào code
 std::string TrampolineInjector::get_random_junk_instruction() {
     std::vector<std::string> junk_instructions;
 
     if (is_64_bit) {
         junk_instructions = {
-            // Basic no-op equivalents
+            // tương đương no-op cơ bản
             "mov rax, rax",
             "mov rbx, rbx",
             "mov rcx, rcx",
             "mov rdx, rdx",
 
-            // Math pairs that cancel each other out (add/sub sequences)
+            // các cặp toán tự triệt tiêu
             "add r8, 0x10; sub r8, 0x10",
             "add r9, 0x20; sub r9, 0x20",
             "add r10, 0x30; sub r10, 0x30",
@@ -325,33 +337,33 @@ std::string TrampolineInjector::get_random_junk_instruction() {
             "add r14, 0x70; sub r14, 0x70",
             "add r15, 0x80; sub r15, 0x80",
 
-            // Reverse order (sub then add)
+            // Đảo ngược
             "sub r8, 0x15; add r8, 0x15",
             "sub r9, 0x25; add r9, 0x25",
             "sub r10, 0x35; add r10, 0x35",
             "sub r11, 0x45; add r11, 0x45",
 
-            // More complex math sequences
+			// các chuỗi toán học phức tạp hơn
             "add r8, 0x100; sub r8, 0x80; sub r8, 0x80",
             "sub r9, 0x200; add r9, 0x100; add r9, 0x100",
             "add r10, 0x50; add r10, 0x50; sub r10, 0xA0",
 
-            // XOR patterns that cancel out
+			// các mẫu XOR đơn giản
             "xor r8, 0x1234; xor r8, 0x1234",
             "xor r9, 0x5678; xor r9, 0x5678",
             "xor r10, 0x9ABC; xor r10, 0x9ABC",
             "xor r11, 0xDEF0; xor r11, 0xDEF0",
 
-            // Shift operations that cancel
+			// các hoạt động stack đơn giản
             "shl r8, 2; shr r8, 2",
             "shl r9, 3; shr r9, 3",
             "shr r10, 1; shl r10, 1",
             "shr r11, 2; shl r11, 2",
 
-            // Cross-register stack operations (more confusing)
+            // Cross-register stack
             "push r8; push r9; pop r9; pop r8",
 
-            // Bit operations that don't change values
+			// các phép toán bit không thay đổi giá trị
             "or r8, 0",
             "and r8, -1",
             "or r9, 0",
@@ -359,19 +371,19 @@ std::string TrampolineInjector::get_random_junk_instruction() {
             "or r10, 0",
             "and r10, -1",
 
-            // ROL/ROR operations that cancel out
+			// các phép rol/ror không thay đổi giá trị
             "rol r8, 1; ror r8, 1",
             "rol r9, 2; ror r9, 2",
             "ror r10, 3; rol r10, 3",
             "ror r11, 4; rol r11, 4",
 
-            // INC/DEC pairs
+            // cặp INC/DEC
             "inc r8; dec r8",
             "inc r9; dec r9",
             "dec r10; inc r10",
             "dec r11; inc r11",
 
-            // Multiple operations that result in no change
+			// Nhiều thao tác không thay đổi giá trị
             "mov r8, r9; mov r9, r8; mov r8, r9; mov r9, r8",
             "add r8, 1; add r8, 1; sub r8, 2",
             "sub r9, 5; add r9, 3; add r9, 2",
@@ -380,7 +392,6 @@ std::string TrampolineInjector::get_random_junk_instruction() {
     }
     else {
         junk_instructions = {
-            // 32-bit equivalents with similar patterns
             "mov eax, eax",
             "mov ebx, ebx",
             "mov ecx, ecx",
@@ -388,22 +399,18 @@ std::string TrampolineInjector::get_random_junk_instruction() {
             "mov esi, esi",
             "mov edi, edi",
 
-            // Math pairs for 32-bit
             "add esi, 0x10; sub esi, 0x10",
             "add edi, 0x20; sub edi, 0x20",
             "sub esi, 0x15; add esi, 0x15",
             "sub edi, 0x25; add edi, 0x25",
 
-            // XOR patterns
             "xor esi, 0x1234; xor esi, 0x1234",
             "xor edi, 0x5678; xor edi, 0x5678",
 
-            // Stack operations
             "push esi; pop esi",
             "push edi; pop edi",
             "push eax; push ebx; pop ebx; pop eax",
 
-            // Other operations
             "test esi, esi",
             "test edi, edi",
             "cmp esi, esi",
@@ -420,7 +427,7 @@ std::string TrampolineInjector::get_random_junk_instruction() {
     return junk_instructions[rand() % junk_instructions.size()];
 }
 
-// Helper function to fill remaining space with appropriate NOPs
+// Điền các NOP (không làm gì cả) vào vùng nhớ còn trống
 void TrampolineInjector::fill_remaining_space_with_nops(uint64_t address, size_t size) {
     while (size > 0) {
         if (size >= 9) {
@@ -489,6 +496,7 @@ void TrampolineInjector::fill_remaining_space_with_nops(uint64_t address, size_t
     }
 }
 
+// Tạo một JMP từ địa chỉ gốc tới mã relocated, chèn junk để che giấu
 bool TrampolineInjector::create_trampoline(uint64_t original_func_va, uint64_t new_func_va, size_t original_size) {
     ks_engine* ks;
     ks_err ks_e;
@@ -499,7 +507,7 @@ bool TrampolineInjector::create_trampoline(uint64_t original_func_va, uint64_t n
         return false;
     }
 
-    // Calculate position for JMP first
+	// tính vị trí và kích thước của junk code trước khi chèn JMP
     size_t min_junk_before = std::min((size_t)3, original_size / 3);
     size_t max_junk_before = (original_size > 5 + 1) ? (original_size - 5 - 1) : min_junk_before; // 5 bytes for JMP
 
@@ -512,13 +520,12 @@ bool TrampolineInjector::create_trampoline(uint64_t original_func_va, uint64_t n
         junk_before_size = min_junk_before + (rand() % (max_junk_before - min_junk_before + 1));
     }
 
-    // JMP will be placed at this VA
+    // lệnh jmp sẽ được đặt tại VA này
     uint64_t jmp_va = original_func_va + junk_before_size;
 
-    // Calculate relative offset for JMP instruction
-    // JMP instruction: E9 [4-byte relative offset]
-    // Target = JMP_VA + 5 + relative_offset
-    // So: relative_offset = Target - (JMP_VA + 5)
+    // Tính toán độ lệch tương đối cho lệnh JMP
+    // JMP: E9 [4-byte offset tương đối]
+    // Target = JMP_VA + 5 + relative_offset --> relative_offset = Target - (JMP_VA + 5)
     int64_t relative_offset_64 = static_cast<int64_t>(new_func_va) - static_cast<int64_t>(jmp_va + 5);
 
     /*std::cout << "JMP calculation:" << std::endl;
@@ -535,7 +542,7 @@ bool TrampolineInjector::create_trampoline(uint64_t original_func_va, uint64_t n
 
     int32_t relative_offset = static_cast<int32_t>(relative_offset_64);
 
-    // Create JMP instruction manually
+	// tạo lệnh JMP thủ công
     std::vector<uint8_t> jmp_bytes(5);
     jmp_bytes[0] = 0xE9; // JMP rel32 opcode
     memcpy(jmp_bytes.data() + 1, &relative_offset, sizeof(int32_t));
@@ -551,7 +558,7 @@ bool TrampolineInjector::create_trampoline(uint64_t original_func_va, uint64_t n
 
         uint64_t current_address = original_func_va;
 
-        // Phase 1: Patch junk code before JMP
+		// patch mã rác (junk) trước lệnh JMP
         size_t remaining_before = junk_before_size;
         /*std::cout << "Phase 1: Adding " << remaining_before << " bytes of junk before JMP..." << std::endl;*/
 
@@ -588,17 +595,18 @@ bool TrampolineInjector::create_trampoline(uint64_t original_func_va, uint64_t n
             }
         }
 
-        // Phase 2: Patch the JMP instruction
+		// patch lệnh jmp tại địa chỉ hiện tại
         /*std::cout << "Phase 2: Patching JMP at VA 0x" << std::hex << current_address
             << " -> target 0x" << new_func_va << std::dec << std::endl;*/
 
         binary->patch_address(current_address, jmp_bytes);
         current_address += jmp_size;
 
-        // Phase 3: Patch junk code after JMP
+		// patch junkode sau lệnh JMP
         size_t remaining_after = junk_after_size;
         /*std::cout << "Phase 3: Adding " << remaining_after << " bytes of junk after JMP..." << std::endl;*/
 
+		// nếu không có junk sau lệnh JMP, điền bằng NOPs
         while (remaining_after > 0) {
             std::string junk_asm = get_random_junk_instruction();
             unsigned char* junk_encode = nullptr;
@@ -641,6 +649,7 @@ bool TrampolineInjector::create_trampoline(uint64_t original_func_va, uint64_t n
     }
 }
 
+// Inject một hàm: relocate mã gốc, tạo section mới, chèn trampoline
 bool TrampolineInjector::inject_function_trampoline(uint32_t function_rva) {
     uint64_t original_function_va = image_base + function_rva;
 
@@ -654,7 +663,7 @@ bool TrampolineInjector::inject_function_trampoline(uint32_t function_rva) {
     std::vector<uint8_t> relocated_code_bytes;
     size_t original_function_processed_size = 0;
 
-    // First, get the relocated code before building
+	// đầu tiên lấy mã relocated trước khi build
     if (!get_and_relocate_original_function_code(original_function_va, 0, relocated_code_bytes, original_function_processed_size)) {
         std::cerr << "Error processing original function code." << std::endl;
         return false;
@@ -665,7 +674,7 @@ bool TrampolineInjector::inject_function_trampoline(uint32_t function_rva) {
         return false;
     }
 
-    // Find the new section
+    // tìm section mới đã tạo
     LIEF::PE::Section* new_section_ptr = nullptr;
     for (LIEF::PE::Section& sec : binary->sections()) {
         if (sec.name() == ".injcod") {
@@ -679,7 +688,7 @@ bool TrampolineInjector::inject_function_trampoline(uint32_t function_rva) {
         return false;
     }
 
-    // Update section content first
+    // cập nhật nội dung section mới trước
     uint32_t file_alignment = binary->optional_header().file_alignment();
     if (file_alignment == 0) file_alignment = 0x200;
 
@@ -695,7 +704,7 @@ bool TrampolineInjector::inject_function_trampoline(uint32_t function_rva) {
     new_section_ptr->virtual_size(static_cast<uint32_t>(final_virtual_size));
     new_section_ptr->content(relocated_code_bytes);
 
-    // Build to finalize layout
+	// xây d dựng lại layout của binary
     LIEF::PE::Builder temp_builder(*binary);
     temp_builder.build_imports(false);
     temp_builder.patch_imports(false);
@@ -707,18 +716,18 @@ bool TrampolineInjector::inject_function_trampoline(uint32_t function_rva) {
         return false;
     }
 
-    // Get final section address after build
+    // nhận địa chỉ vùng cuối cùng sau khi build
     uint64_t new_function_base_va = image_base + new_section_ptr->virtual_address();
     std::cout << "New section '.injcod' VA: 0x" << std::hex << new_function_base_va << std::dec << std::endl;
 
-    // Now relocate the code with correct target address
+	// di ch chuyển mã gốc sang địa chỉ mới chính xác
     relocated_code_bytes.clear();
     if (!get_and_relocate_original_function_code(original_function_va, new_function_base_va, relocated_code_bytes, original_function_processed_size)) {
         std::cerr << "Error processing original function code with correct VA." << std::endl;
         return false;
     }
 
-    // Update section content with properly relocated code
+	// cập nhật nội dung section mới với mã đã relocate
     new_section_ptr->content(relocated_code_bytes);
     print_bytes("Relocated code (" + std::to_string(relocated_code_bytes.size()) + " bytes): ", relocated_code_bytes);
 
@@ -731,7 +740,7 @@ bool TrampolineInjector::inject_function_trampoline(uint32_t function_rva) {
     return true;
 }
 
-// Helper để tạo tên section unique
+// Tạo các tên section duy nhất dựa trên tên hàm và chỉ mục
 std::string TrampolineInjector::generate_unique_section_name(const std::string& function_name, int index) {
     std::string clean_name = function_name;
 
@@ -818,7 +827,7 @@ bool TrampolineInjector::inject_multiple_function_trampolines(const std::vector<
             return false;
         }
 
-        // Cập nhật section content
+        // Cập nhật nội dung section
         uint32_t file_alignment = binary->optional_header().file_alignment();
         if (file_alignment == 0) file_alignment = 0x200;
 
@@ -834,7 +843,7 @@ bool TrampolineInjector::inject_multiple_function_trampolines(const std::vector<
         new_section_ptr->virtual_size(static_cast<uint32_t>(final_virtual_size));
         new_section_ptr->content(relocated_code_bytes);
 
-        // Build để finalize layout
+        // dựng finalize layout
         LIEF::PE::Builder temp_builder(*binary);
         temp_builder.build_imports(false);
         temp_builder.patch_imports(false);
@@ -850,7 +859,7 @@ bool TrampolineInjector::inject_multiple_function_trampolines(const std::vector<
         uint64_t new_function_base_va = image_base + new_section_ptr->virtual_address();
         // std::cout << "Section " << section_name << " VA: 0x" << std::hex << new_function_base_va << std::dec << std::endl;
 
-        // Relocate lại code với địa chỉ VA chính xác
+        // Di chuyển lại code với địa chỉ VA chính xác
         relocated_code_bytes.clear();
         if (!get_and_relocate_original_function_code(original_function_va, new_function_base_va, relocated_code_bytes, original_function_processed_size)) {
             std::cerr << "Error processing original function code with correct VA for " << function_name << std::endl;
@@ -874,7 +883,7 @@ bool TrampolineInjector::inject_multiple_function_trampolines(const std::vector<
     return true;
 }
 
-// NEW: Smart injection with automatic limiting
+// Chèn thông minh nhiều hàm với giới hạn số lượng
 bool TrampolineInjector::inject_multiple_function_trampolines_with_limit(
     const std::vector<uint32_t>& function_rvas,
     const std::vector<std::string>& function_names,
@@ -892,11 +901,11 @@ bool TrampolineInjector::inject_multiple_function_trampolines_with_limit(
         return false;
     }
 
-    // Check section limits
+    // kiểm tra số lượng hàm giới hạn được chèn
     uint32_t max_injectable = calculate_max_injectable_functions();
     uint32_t planned_injections = static_cast<uint32_t>(function_rvas.size());
 
-    // Show section analysis
+	// show phân tích số lượng hàm sẽ chèn
     check_section_limit_before_injection(planned_injections);
 
     if (max_injectable == 0) {
@@ -904,23 +913,23 @@ bool TrampolineInjector::inject_multiple_function_trampolines_with_limit(
         return false;
     }
 
-    // Limit the number of functions to inject
+	// Giới hạn số lượng hàm sẽ chèn
     uint32_t functions_to_inject = std::min(planned_injections, max_injectable);
 
     std::cout << "Proceeding with injection of " << functions_to_inject << " function(s) out of "
         << planned_injections << " requested." << std::endl;
 
-    // Create limited vectors
+	// tạo vector giới hạn
     std::vector<uint32_t> limited_rvas(function_rvas.begin(), function_rvas.begin() + functions_to_inject);
     std::vector<std::string> limited_names(function_names.begin(), function_names.begin() + functions_to_inject);
 
-    // Perform injection with limited set
+	// thưc hiện chèn các hàm đạt điều kiện
     bool result = inject_multiple_function_trampolines(limited_rvas, limited_names);
 
     return result;
 }
 
-// Static utility function cho nhiều hàm
+// Hàm static: inject nhiều hàm không giới hạn
 bool TrampolineInjector::inject_trampoline_to_multiple_functions(
     const std::string& input_pe_path,
     const std::string& output_pe_path,
@@ -941,7 +950,7 @@ bool TrampolineInjector::inject_trampoline_to_multiple_functions(
     return injector.save_pe(output_pe_path);
 }
 
-// NEW: Static utility function với auto-limiting
+// Hàm static: inject nhiều hàm có kiểm tra giới hạn section
 bool TrampolineInjector::inject_trampoline_to_multiple_functions_smart(
     const std::string& input_pe_path,
     const std::string& output_pe_path,
@@ -979,7 +988,7 @@ bool TrampolineInjector::save_pe(const std::string& output_path) {
     }
 }
 
-// Static utility function
+// Hàm static: inject một hàm đơn
 bool TrampolineInjector::inject_trampoline_to_function(
     const std::string& input_pe_path,
     const std::string& output_pe_path,
