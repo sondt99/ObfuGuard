@@ -141,7 +141,7 @@
     <ClCompile Include="cfflattener\cfflattener.cpp" />
     <ClCompile Include="func2rva\func2rva.cpp" />
     <ClCompile Include="main.cpp" />
-    <ClCompile Include="obfuscator\obfuscator.cpp" />
+    <ClCompile Include="obfuscatecff\obfuscatecff.cpp" />
     <ClCompile Include="pdbparser\pdbparser.cpp" />
     <ClCompile Include="pe\pe.cpp" />
     <ClCompile Include="junkcode\junkcode.cpp" />
@@ -149,7 +149,7 @@
   <ItemGroup>
     <ClInclude Include="cfflattener\cfflattener.h" />
     <ClInclude Include="func2rva\func2rva.h" />
-    <ClInclude Include="obfuscator\obfuscator.h" />
+    <ClInclude Include="obfuscatecff\obfuscatecff.h" />
     <ClInclude Include="junkcode\junkcode.h" />
     <ClInclude Include="pdbparser\pdbparser.h" />
     <ClInclude Include="pe\pe.h" />
