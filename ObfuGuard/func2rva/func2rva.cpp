@@ -12,7 +12,7 @@
 #include <memory>    
 
 
-namespace FuncToRVA {
+namespace FuncToRVA { // Namespace for function to RVA resolution
 
     RVAResolver::RVAResolver(const std::string& pe_path)
         : pe_path_str_(pe_path),
@@ -20,12 +20,9 @@ namespace FuncToRVA {
         image_base_(0),
         text_section_rva_(0),
         has_text_section_for_reference_(false) {
-       
     }
 
-    RVAResolver::~RVAResolver() {
-       
-    }
+    RVAResolver::~RVAResolver() {}
 
     bool RVAResolver::initialize() {
         if (is_initialized_) {
@@ -36,20 +33,17 @@ namespace FuncToRVA {
     }
 
     bool RVAResolver::load_pe_and_parse_pdb() {
-        try {
-            
+        try {   
             pe_file_handle_ = std::make_unique<pe64>(pe_path_str_);
 
-          
-            PIMAGE_NT_HEADERS nt_headers = pe_file_handle_->get_nt();
+			PIMAGE_NT_HEADERS nt_headers = pe_file_handle_->get_nt(); // Get NT Headers from PE file
             if (!nt_headers) {
                 std::cerr << "Error: Could not get NT Headers from PE file: " << pe_path_str_ << std::endl;
                 return false;
             }
             image_base_ = nt_headers->OptionalHeader.ImageBase;
 
-         
-            PIMAGE_SECTION_HEADER text_section = pe_file_handle_->get_section(".text");
+			PIMAGE_SECTION_HEADER text_section = pe_file_handle_->get_section(".text"); // Get the .text section
             if (text_section) {
                 text_section_rva_ = text_section->VirtualAddress;
                 has_text_section_for_reference_ = true;
@@ -57,10 +51,8 @@ namespace FuncToRVA {
             else {
                 std::cerr << "Warning: Could not find '.text' section in file " << pe_path_str_
                     << ". RVA calculations may be affected." << std::endl;
-              
                 // Based on original func2rva.cpp, it assumes PDB offset is added to .text RVA.
             }
-
 
             pdb_parser_handle_ = std::make_unique<pdbparser>(pe_file_handle_.get());
             std::vector<pdbparser::sym_func> functions_from_pdb = pdb_parser_handle_->parse_functions();
