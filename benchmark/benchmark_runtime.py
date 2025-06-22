@@ -271,7 +271,7 @@ def main():
     write_csv_headers()
     
     # Benchmark
-    for orig in find_original_binaries("."):
+    for orig in find_original_binaries("../binary_test"):
         orig_stats = benchmark_runtime_with_stats(orig)
         if not orig_stats:
             print(f"[!] Bỏ qua {orig} do lỗi benchmark")

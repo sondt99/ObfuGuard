@@ -1,2 +1,0 @@
-E:\ObfuGuard\x64\Debug\CFF.exe
-E:\ObfuGuard\x64\Debug\CFF.cff.exe
