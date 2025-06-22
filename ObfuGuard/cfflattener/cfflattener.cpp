@@ -1,4 +1,4 @@
-﻿#include "../obfuscator/obfuscator.h"
+﻿#include "../obfuscatecff/obfuscatecff.h"
 
 #include <random>
 
@@ -37,11 +37,11 @@ bool is_jmp_conditional(ZydisDecodedInstruction instr) {
 
 
 // áp dụng thuật toán làm phẳng luồng
-bool obfuscator::apply_control_flow_flattening(std::vector<obfuscator::function_t>::iterator& func) {
+bool obfuscatecff::apply_control_flow_flattening(std::vector<obfuscatecff::function_t>::iterator& func) {
 
 	struct block_t {
 		int block_id;
-		std::vector < obfuscator::instruction_t>instructions;
+		std::vector < obfuscatecff::instruction_t>instructions;
 
 		int next_block;
 		int dst_block = -1;
@@ -53,7 +53,7 @@ bool obfuscator::apply_control_flow_flattening(std::vector<obfuscator::function_
 	block_t block;
 	int block_iterator = 0;
 
-	
+
 	// thực hiện khởi tạo vector block_start
 
 	for (auto instruction = func->instructions.begin(); instruction != func->instructions.end(); instruction++) {
@@ -66,7 +66,7 @@ bool obfuscator::apply_control_flow_flattening(std::vector<obfuscator::function_
 		}
 	}
 
-	
+
 	// detect các block trong hàm
 	for (auto instruction = func->instructions.begin(); instruction != func->instructions.end(); instruction++) {
 
@@ -125,7 +125,7 @@ bool obfuscator::apply_control_flow_flattening(std::vector<obfuscator::function_
 	auto rng = std::default_random_engine{};
 	std::shuffle(blocks.begin(), blocks.end(), rng);
 
-	
+
 
 	// thực hiện tái cấu trúc luồng với bộ điều phối thông qua so sánh với biến trạng thái rax
 
@@ -157,7 +157,7 @@ bool obfuscator::apply_control_flow_flattening(std::vector<obfuscator::function_
 		it = it + 4;
 	}
 
-	
+
 
 	for (auto inst = func->instructions.begin(); inst != it + 1; inst++) {
 
@@ -173,7 +173,7 @@ bool obfuscator::apply_control_flow_flattening(std::vector<obfuscator::function_
 	// cấu hình lại các block để nó trở lại bộ điều phối sau khi thực hiện xong
 	for (auto current_block = blocks.begin(); current_block != blocks.end() - 1; current_block++) {
 
-		auto last_instruction = std::find_if(func->instructions.begin(), func->instructions.end(), [&](obfuscator::instruction_t it) {
+		auto last_instruction = std::find_if(func->instructions.begin(), func->instructions.end(), [&](obfuscatecff::instruction_t it) {
 			return it.inst_id == (current_block->instructions.end() - 1)->inst_id;
 			});
 
@@ -217,7 +217,7 @@ bool obfuscator::apply_control_flow_flattening(std::vector<obfuscator::function_
 				last_instruction = last_instruction + 3;
 			}
 
-			
+
 			last_instruction = last_instruction - 8;
 			last_instruction->relative.target_inst_id = (last_instruction + 5)->inst_id;
 
