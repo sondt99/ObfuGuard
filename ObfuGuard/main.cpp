@@ -2,25 +2,24 @@
 #include <string>
 #include <filesystem>
 #include <vector>
-#include <algorithm> // For std::transform
-#include <limits>    // For std::numeric_limits
-#include <iomanip>   // For std::hex, std::dec
-#include <ctime>     // For clock, time, srand
-#include <stdexcept> // For std::runtime_error, etc.
-#include <fstream>   // For reading files
+#include <algorithm>
+#include <limits>
+#include <iomanip>
+#include <ctime>
+#include <stdexcept>
+#include <fstream>
 #define NOMINMAX
 #include <windows.h>
-#include <sstream>  // Cần cho stringstream
+#include <sstream>
 #include <set>
-
-// Import necessary headers for PE manipulation and obfuscation
 #include "pe/pe.h"
 #include "pdbparser/pdbparser.h"
-#include "obfuscator/obfuscator.h"
+#include "obfuscatecff/obfuscatecff.h"
 #include "junkcode/junkcode.h"
 #include "func2rva/func2rva.h"
 
 
+// Định nghĩa các hàm ảnh hưởng đến các chức năng nguy hiểm hoặc không mong muốn
 const std::set<std::string> DANGEROUS_FUNCTION_NAMES = {
     "mainCRTStartup","atexit",
     "__scrt_initialize_onexit_tables",
@@ -36,27 +35,29 @@ const std::set<std::string> DANGEROUS_FUNCTION_NAMES = {
 	"pre_cpp_initialization","operator new","operator delete","failwithmessage",
 };
 
+// Định nghĩa các tiền tố nguy hiểm có thể xuất hiện trong tên hàm có tác động không mong muốn
 const std::vector<std::string> DANGEROUS_PREFIXES = {
     "??_",
 };
 
 
+// Kiểm tra xem tên hàm có bị blacklist hay không
 bool is_function_blacklisted(const std::string& func_name) {
-    // C++ mangled names
+	// Các hàm có ký tự đặc biệt như "_" hoặc "`" thường là các hàm nội bộ hoặc không mong muốn
     if (func_name.find_first_of("`_") != std::string::npos) {
         return true;
     }
-	// start with underscore
+	// bắt đầu bằng dấu gạch dưới
     if (func_name.rfind('_', 0) == 0) {
         return true;
     }
 
-	// check for dangerous function names
+	// Kiểm tra xem tên hàm có nằm trong danh sách các hàm nguy hiểm hay không
     if (DANGEROUS_FUNCTION_NAMES.count(func_name)) {
         return true;
     }
 
-	// check for dangerous prefixes
+	// Kiểm tra xem tên hàm có bắt đầu bằng các tiền tố nguy hiểm hay không
     for (const auto& prefix : DANGEROUS_PREFIXES) {
         if (func_name.rfind(prefix, 0) == 0) {
             return true;
@@ -66,10 +67,10 @@ bool is_function_blacklisted(const std::string& func_name) {
     return false;
 }
 
-// print banner
+// In ra banner khi sử dụng công cụ
 void print_banner() {
     std::cout << "========================================\n";
-    std::cout << "         ObfuGuard Tool - BKSEC         \n";
+    std::cout << "         ObfuGuard Tool - sondt         \n";
     std::cout << "========================================\n\n";
 }
 
@@ -81,7 +82,7 @@ void print_menu() {
     std::cout << "Enter your choice (0-2): ";
 }
 
-// input file path and check if it exists
+// tệp đầu vào và kiểm tra tính hợp lệ
 bool get_file_input(const std::string& prompt, std::string& file_path) {
     std::cout << prompt;
     std::getline(std::cin, file_path);
@@ -101,17 +102,17 @@ bool get_file_input(const std::string& prompt, std::string& file_path) {
     return true;
 }
 
-// Helper function to sort functions by size (descending order)
+// Sắp xếp các hàm theo kích thước giảm dần
 void sort_functions_by_size_desc(std::vector<uint32_t>& function_rvas,
     std::vector<std::string>& function_names,
     const std::vector<FuncToRVA::FunctionInfo>& all_functions) {
-    // Create index pairs for sorting
+    // Tạo một vector để lưu trữ cặp chỉ mục và kích thước
     std::vector<std::pair<size_t, uint32_t>> index_size_pairs;
 
     for (size_t i = 0; i < function_rvas.size(); ++i) {
         uint32_t rva = function_rvas[i];
 
-        // Find the size for this RVA
+		// Tìm kích thước của hàm dựa trên RVA
         auto it = std::find_if(all_functions.begin(), all_functions.end(),
             [rva](const FuncToRVA::FunctionInfo& func) { return func.rva == rva; });
 
@@ -119,17 +120,17 @@ void sort_functions_by_size_desc(std::vector<uint32_t>& function_rvas,
             index_size_pairs.push_back({ i, it->size });
         }
         else {
-            index_size_pairs.push_back({ i, 0 }); // Unknown size, put at end
+			index_size_pairs.push_back({ i, 0 }); // Nếu không tìm thấy, đặt kích thước là 0
         }
     }
 
-    // Sort by size (descending)
+	// sắp xếp các cặp chỉ mục và kích thước theo kích thước giảm dần
     std::sort(index_size_pairs.begin(), index_size_pairs.end(),
         [](const std::pair<size_t, uint32_t>& a, const std::pair<size_t, uint32_t>& b) {
-            return a.second > b.second; // Descending order
+			return a.second > b.second; // Giảm dần theo kích thước
         });
 
-    // Reorder the arrays based on sorted indices
+	// sắp xếp lại các mảng dựa trên chỉ mục đã sắp xếp
     std::vector<uint32_t> sorted_rvas;
     std::vector<std::string> sorted_names;
 
@@ -142,6 +143,7 @@ void sort_functions_by_size_desc(std::vector<uint32_t>& function_rvas,
     function_names = std::move(sorted_names);
 }
 
+// Hàm để lấy nhiều RVA tương tác từ người dùng -  phục vụ cho việc chọn nhiều hàm để làm rối
 bool get_multiple_rvas_interactive(const std::string& input_pe_path,
     std::vector<uint32_t>& rvas_out,
     std::vector<std::string>& names_out) {
@@ -158,7 +160,7 @@ bool get_multiple_rvas_interactive(const std::string& input_pe_path,
         std::cout << "Selection via PDB failed, was canceled by user, PDB not found, or PDB unparsable." << std::endl;
         std::cout << "Please enter RVAs manually or ensure a valid PDB is accessible.\n" << std::endl;
 
-        // Manual input cho nhiều RVA
+        // Nhập thủ công cho nhiều RVAs
         std::string input_str;
         std::cout << "Type RVAs of functions (comma-separated, e.g., 1A2B0,1C3D0): ";
         std::getline(std::cin, input_str);
@@ -168,14 +170,14 @@ bool get_multiple_rvas_interactive(const std::string& input_pe_path,
             return false;
         }
 
-        // Parse comma-separated RVAs
+        // Lấy các thứ tự tương ứng với các RVA
         std::stringstream ss(input_str);
         std::string token;
         rvas_out.clear();
         names_out.clear();
 
         while (std::getline(ss, token, ',')) {
-            // Trim whitespace
+            // tách khoảng trắng
             token.erase(0, token.find_first_not_of(" \t"));
             token.erase(token.find_last_not_of(" \t") + 1);
 
@@ -212,6 +214,7 @@ bool get_multiple_rvas_interactive(const std::string& input_pe_path,
     }
 }
 
+// Hàm để lấy RVA tương tác từ người dùng - phục vụ cho việc chọn duy nhất một hàm để làm rối
 bool get_rva_interactive(const std::string& input_pe_path, uint32_t& rva_out) {
     std::string input_str;
     while (true) {
@@ -269,9 +272,8 @@ bool get_rva_interactive(const std::string& input_pe_path, uint32_t& rva_out) {
     }
 }
 
-// function to detect PE architecture
-// returns true if successful, false if not
-// is64Bit is set to true if the PE file is 64-bit, false if it is 32-bit
+// tự động phát hiện kiến trúc tệp PE
+// is64Bit: biến đầu ra lưu trữ kiến trúc
 bool DetectPEArchitecture(const std::string& filePath, bool& is64Bit) {
     std::ifstream peFile(filePath, std::ios::binary);
     if (!peFile.is_open()) {
@@ -279,6 +281,7 @@ bool DetectPEArchitecture(const std::string& filePath, bool& is64Bit) {
         return false;
     }
 
+	// Đọc DOS header
     IMAGE_DOS_HEADER dosHeader;
     if (!peFile.read(reinterpret_cast<char*>(&dosHeader), sizeof(IMAGE_DOS_HEADER))) {
         std::cerr << "Error [DetectPE]: Could not read DOS header from: " << filePath << std::endl;
@@ -286,28 +289,31 @@ bool DetectPEArchitecture(const std::string& filePath, bool& is64Bit) {
         return false;
     }
 
+	// Kiểm tra chữ ký DOS (MZ)
     if (dosHeader.e_magic != IMAGE_DOS_SIGNATURE) { // 0x5A4D (MZ)
         std::cerr << "Error [DetectPE]: Not a valid PE file (Missing MZ signature): " << filePath << std::endl;
         peFile.close();
         return false;
     }
 
-    // Additional check for e_lfanew to ensure it is a valid offset
-    // or a non-negative value
+	// Kiểm tra e_lfanew để đảm bảo nó là hợp lệ
     if (dosHeader.e_lfanew == 0 || static_cast<long>(dosHeader.e_lfanew) < 0) {
         std::cerr << "Error [DetectPE]: Invalid PE header offset (e_lfanew is " << dosHeader.e_lfanew << ") in: " << filePath << std::endl;
         peFile.close();
         return false;
     }
 
+	// Đến vị trí của PE header
     peFile.seekg(dosHeader.e_lfanew, std::ios::beg);
-    if (peFile.fail()) { // check if seek was successful
+	// kiểm tra xem việc di chuyển con trỏ tệp có thành công không
+    if (peFile.fail()) {
         std::cerr << "Error [DetectPE]: Failed to seek to PE header (e_lfanew: 0x"
             << std::hex << dosHeader.e_lfanew << std::dec << ") in: " << filePath << std::endl;
         peFile.close();
         return false;
     }
 
+	// Đọc PE signature
     DWORD signature;
     if (!peFile.read(reinterpret_cast<char*>(&signature), sizeof(DWORD))) {
         std::cerr << "Error [DetectPE]: Could not read PE signature from: " << filePath << std::endl;
@@ -315,12 +321,14 @@ bool DetectPEArchitecture(const std::string& filePath, bool& is64Bit) {
         return false;
     }
 
+	// kiểm tra chữ ký PE (PE00)
     if (signature != IMAGE_NT_SIGNATURE) { // 0x00004550 (PE00)
         std::cerr << "Error [DetectPE]: Not a valid PE file (Missing PE signature 'PE00'): " << filePath << std::endl;
         peFile.close();
         return false;
     }
 
+	// Đọc File header
     IMAGE_FILE_HEADER fileHeader;
     if (!peFile.read(reinterpret_cast<char*>(&fileHeader), sizeof(IMAGE_FILE_HEADER))) {
         std::cerr << "Error [DetectPE]: Could not read File header from: " << filePath << std::endl;
@@ -329,14 +337,16 @@ bool DetectPEArchitecture(const std::string& filePath, bool& is64Bit) {
     }
 
     WORD magic;
-    if (!peFile.read(reinterpret_cast<char*>(&magic), sizeof(WORD))) { // read Magic number
+	// Đến Optional header
+	if (!peFile.read(reinterpret_cast<char*>(&magic), sizeof(WORD))) { // Đọc Magic number
         std::cerr << "Error [DetectPE]: Could not read Magic number from OptionalHeader in: " << filePath << std::endl;
         peFile.close();
         return false;
     }
 
-    peFile.close(); // close the file after reading
+    peFile.close();
 
+	// Kiểm tra Magic number để xác định kiến trúc
     if (magic == IMAGE_NT_OPTIONAL_HDR32_MAGIC) { // 0x10b
         is64Bit = false; // 32-bit
         return true;
@@ -351,7 +361,7 @@ bool DetectPEArchitecture(const std::string& filePath, bool& is64Bit) {
     }
 }
 
-// mode functions
+// hàm chính cho chế độ làm rối mã điều khiển luồng (CFF - Control Flow Flattening)
 int mode_control_flow_flattening() {
     std::cout << "\n=== Original Obfuscation (Control Flow Flattening) Mode ===\n";
     std::string binary_path;
@@ -360,41 +370,43 @@ int mode_control_flow_flattening() {
         return 1;
     }
 
-    const clock_t begin_time = clock();
+	const clock_t begin_time = clock(); // Bắt đầu tính thời gian thực hiện
+    
     try {
-        // check if the file is a valid PE file and determine its architecture
+		// Kiểm tra kiến trúc của tệp PE
         bool is_input_64_bit_cff;
         if (!DetectPEArchitecture(binary_path, is_input_64_bit_cff)) {
             std::cerr << "Control Flow Flattening Mode: Failed to determine PE architecture for " << binary_path << ". Aborting." << std::endl;
             return 1;
         }
-        if (!is_input_64_bit_cff) { // suppose pe64 is only for 64-bit files
+		if (!is_input_64_bit_cff) {
             std::cerr << "Control Flow Flattening Mode: Input file " << binary_path << " is 32-bit. This mode currently expects a 64-bit PE file. Aborting." << std::endl;
             return 1;
         }
-        std::cout << "Control Flow Flattening Mode: Detected 64-bit PE file: " << std::endl;
+        std::cout << "Control Flow Flattening Mode: Detected 64-bit PE" << std::endl;
 
         pe64 pe(binary_path);
 
-        std::cout << "Parsing PDB information..." << std::endl;
         pdbparser pdb(&pe);
+		// Đẩy PDB từ tệp PE
         auto functions = pdb.parse_functions();
         if (functions.empty()) {
             std::cout << "Warning: No functions found through PDB. Obfuscation might not be effective or possible." << std::endl;
         }
         else {
-            std::cout << "Successfully analyzed " << functions.size() << " function(s)." << std::endl;
+            std::cout << "Successfully analyzed all functions." << std::endl;
         }
 
-        std::cout << "Creating new section for obfuscated code..." << std::endl;
-        auto new_section = pe.create_section(".0Dev", 10000000, IMAGE_SCN_MEM_EXECUTE | IMAGE_SCN_MEM_READ | IMAGE_SCN_CNT_CODE);
+		std::cout << "Creating new section .0Cff" << std::endl; // Tạo section mới cho mã đã làm rối
+        auto new_section = pe.create_section(".0Cff", 10000000, IMAGE_SCN_MEM_EXECUTE | IMAGE_SCN_MEM_READ | IMAGE_SCN_CNT_CODE);
 
-        obfuscator obf(&pe);
-        obf.create_functions(functions);
+        obfuscatecff obf(&pe); // Tạo đối tượng obfuscatecff với tệp PE
+		obf.create_functions(functions); // Tạo các hàm bổ sung từ PDB đã phân tích
 
-        std::cout << "Running CFF obfuscation..." << std::endl;
-        obf.run(new_section, true);
+        std::cout << "Running Control Flow Flattening Mode" << std::endl;
+		obf.run(new_section, true); // Chạy làm rối mã điều khiển luồng (CFF) với section mới và tạo hàm bổ sung
 
+		// Lưu tệp PE đã làm rối
         std::filesystem::path p(binary_path);
         std::string stem = p.stem().string();
         std::string extension = p.extension().string();
@@ -405,11 +417,9 @@ int mode_control_flow_flattening() {
         else {
             output_filename_str = (std::filesystem::path(stem + ".cff" + extension)).lexically_normal().string();
         }
-
-        std::cout << "Saving obfuscated PE to: " << output_filename_str << std::endl;
+        std::cout << "\nSuccessfully control-flow-flattened " << functions.size() << " selected function(s)." << std::endl;
+        std::cout << "Output saved to: " << output_filename_str << std::endl;
         pe.save_to_disk(output_filename_str, new_section, obf.get_added_size());
-
-        std::cout << "Control Flow Flattening Obfuscation completed successfully!" << std::endl;
     }
     catch (const std::runtime_error& e) {
         std::cerr << "Runtime error during CFF obfuscation: " << e.what() << std::endl;
@@ -424,6 +434,7 @@ int mode_control_flow_flattening() {
     return 0;
 }
 
+// Hàm chính cho chế độ chèn mã rối (Junk Code) với Trampoline
 int mode_trampoline_junkcode() {
     std::cout << "\n=== Insert Trampoline with Junk Code Mode ===\n";
     std::string input_pe_path;
@@ -438,6 +449,7 @@ int mode_trampoline_junkcode() {
         std::cerr << "Failed to determine PE architecture for " << input_pe_path << ". Aborting trampoline mode.\n";
         return 1;
     }
+
     std::cout << "Junk Code Injection Mode: Detected: " << (is_64_bit ? "64-bit" : "32-bit") << " PE file\n";
 
     std::filesystem::path p_input(input_pe_path);
@@ -449,6 +461,7 @@ int mode_trampoline_junkcode() {
 
     std::cout << "Output file will be saved as: " << output_pe_path_str << std::endl;
 
+    // Lựa chọn chế độ tự động hay thủ công
     std::string mode_choice;
     std::cout << "\nSelect injection mode:\n";
     std::cout << "  1. Auto-inject functions\n";
@@ -460,7 +473,7 @@ int mode_trampoline_junkcode() {
 
     try {
         if (mode_choice == "1") {
-            // NEW: Enhanced auto-injection with smart limiting
+            // Tự động chèn với giới hạn thông minh
             FuncToRVA::RVAResolver resolver(input_pe_path);
             if (!resolver.initialize()) {
                 std::cerr << "Error: Could not initialize PDB resolver.\n";
@@ -471,7 +484,7 @@ int mode_trampoline_junkcode() {
             std::vector<uint32_t> function_rvas;
             std::vector<std::string> function_names;
 
-            // Filter functions with size > 15 and sort by size (descending)
+			// Lọc các hàm có kích thước lớn hơn 15 bytes và không bị blacklist
             std::vector<std::pair<uint32_t, std::string>> size_sorted_functions;
             int skipped_count = 0; // Đếm số hàm đã bỏ qua
 
@@ -482,7 +495,7 @@ int mode_trampoline_junkcode() {
                 }
 				std::cout << "PASS " << func_info.name << std::endl;
 
-                if (func_info.size > 15) { // Only consider functions larger than 15 bytes
+				if (func_info.size > 15) { // Chỉ lấy các hàm có kích thước lớn hơn 15 bytes
                     size_sorted_functions.push_back({ func_info.size, func_info.name });
                 }
             }
@@ -492,17 +505,17 @@ int mode_trampoline_junkcode() {
             }
 
 
-            // Sort by size (descending) - largest functions first
+			// Sắp xếp các hàm theo kích thước giảm dần
             std::sort(size_sorted_functions.begin(), size_sorted_functions.end(),
                 [](const std::pair<uint32_t, std::string>& a, const std::pair<uint32_t, std::string>& b) {
-                    return a.first > b.first; // Descending order by size
+					return a.first > b.first; // Giảm dần theo kích thước
                 });
 
-            // Extract RVAs and names in sorted order
+			// Phân tách các hàm đã sắp xếp thành danh sách các RVA và tên hàm
             for (const auto& size_name_pair : size_sorted_functions) {
                 const std::string& func_name = size_name_pair.second;
 
-                // Find the function info to get RVA
+				// Tìm kiếm thông tin hàm để lấy RVA    
                 auto it = std::find_if(all_functions.begin(), all_functions.end(),
                     [&func_name](const FuncToRVA::FunctionInfo& func) {
                         return func.name == func_name;
@@ -519,24 +532,17 @@ int mode_trampoline_junkcode() {
                 return 1;
             }
 
-            // std::cout << "\nFound " << function_rvas.size() << " functions > 15 bytes (sorted by size, largest first):" << std::endl;
+            // Hiển thị danh sách các hàm đã tìm thấy
             for (size_t i = 0; i < std::min(static_cast<size_t>(10), function_rvas.size()); ++i) {
-                // Find size for display
+				// Tìm kích thước cho từng hàm để hiển thị
                 auto it = std::find_if(all_functions.begin(), all_functions.end(),
                     [&function_rvas, i](const FuncToRVA::FunctionInfo& func) {
                         return func.rva == function_rvas[i];
                     });
                 uint32_t size = (it != all_functions.end()) ? it->size : 0;
-
-                /*std::cout << "  " << (i + 1) << ". " << function_names[i]
-                    << " (RVA: 0x" << std::hex << function_rvas[i]
-                    << ", Size: " << std::dec << size << " bytes)" << std::endl;*/
             }
-            /*if (function_rvas.size() > 10) {
-                std::cout << "  ... and " << (function_rvas.size() - 10) << " more functions" << std::endl;
-            }*/
 
-            // Use smart injection with automatic limiting
+            // Chèn thông minh với tự động giới hạn các hàm
             uint32_t actual_injected_count = 0;
             bool result = TrampolineInjector::inject_trampoline_to_multiple_functions_smart(
                 input_pe_path,
@@ -552,8 +558,7 @@ int mode_trampoline_junkcode() {
                 return 1;
             }
 
-            std::cout << "\nSuccessfully injected trampolines into " << actual_injected_count
-                << " function(s) out of " << function_rvas.size() << " candidates." << std::endl;
+            std::cout << "\nSuccessfully injected trampolines into " << actual_injected_count << " function(s)" << std::endl;
         }
         else if (mode_choice == "2") {
             std::vector<uint32_t> function_rvas;
@@ -563,7 +568,7 @@ int mode_trampoline_junkcode() {
                 return 1;
             }
 
-            // Check if we can proceed with the selected functions
+			// Kiểm tra nếu có thể tiếp tục với các hàm đã chọn
             TrampolineInjector temp_injector;
             if (!temp_injector.load_pe(input_pe_path)) {
                 std::cerr << "Error: Could not load PE for section analysis.\n";
@@ -581,7 +586,7 @@ int mode_trampoline_junkcode() {
                     return 1;
                 }
 
-                // Use smart injection
+                // Chèn thông minh
                 uint32_t actual_injected_count = 0;
                 bool result = TrampolineInjector::inject_trampoline_to_multiple_functions_smart(
                     input_pe_path,
@@ -601,7 +606,7 @@ int mode_trampoline_junkcode() {
                     << " function(s) out of " << function_rvas.size() << " selected." << std::endl;
             }
             else {
-                // Normal injection - within limits
+                // Chèn thường - giới hạn chấp nhận được
                 bool result = TrampolineInjector::inject_trampoline_to_multiple_functions(
                     input_pe_path,
                     output_pe_path_str,
@@ -624,7 +629,7 @@ int mode_trampoline_junkcode() {
             return 1;
         }
 
-        std::cout << "\nJunk Code Injection completed successfully!\n";
+        std::cout << "\nJunk Code Injection Mode completed successfully!\n";
         std::cout << "Output saved to: " << output_pe_path_str << std::endl;
     }
     catch (const std::exception& e) {
@@ -632,7 +637,7 @@ int mode_trampoline_junkcode() {
         return 1;
     }
 
-    std::cout << "Completed in " << static_cast<float>(clock() - begin_time) / CLOCKS_PER_SEC << " seconds.\n";
+    std::cout << "Junk Code Injection mode completed in " << static_cast<float>(clock() - begin_time) / CLOCKS_PER_SEC << " seconds.\n";
     return 0;
 }
 
@@ -666,7 +671,7 @@ int main() {
         mode_trampoline_junkcode();
     }
     else if (choice_num == 0) {
-        std::cout << "Exiting ObfuGuard by BKSEC. Goodbye!\n";
+        std::cout << "Exiting ObfuGuard by sondt. Goodbye!\n";
     }
     else {
         std::cerr << "Error: Invalid choice. Please enter a number from the menu.\n";
