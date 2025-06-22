@@ -56,7 +56,7 @@ def analyze_timing_ms(path: str) -> dict:
 def percent_diff(new, old):
     return 0.0 if old == 0 else (new - old) / old * 100.0
 
-def find_original_binaries(root="."):
+def find_original_binaries(root):
     for subdir, _, files in os.walk(root):
         for f in files:
             if f.endswith(".exe") and ".cff." not in f and ".junk." not in f:
@@ -87,7 +87,7 @@ def append_comparison_row(orig_path, variant_path, variant_type, base_metrics, v
 
 def main():
     write_csv_header(OUTPUT_CSV)
-    for orig in find_original_binaries("."):
+    for orig in find_original_binaries("../binary_test"):
         try:
             base_metrics = analyze_timing_ms(orig)
         except Exception as e:
