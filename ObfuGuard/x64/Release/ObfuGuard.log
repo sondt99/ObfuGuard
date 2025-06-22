@@ -32,17 +32,13 @@ E:\Graduation-Thesis-HUST\ObfuGuard\obfuscatecff\obfuscatecff.h(102,9): warning 
       E:\Graduation-Thesis-HUST\ObfuGuard\obfuscatecff\obfuscatecff.h(16,9):
       see declaration of 'obfuscatecff::function_t'
   
-E:\Graduation-Thesis-HUST\ObfuGuard\obfuscatecff\obfuscatecff.cpp(79,75): warning C4244: '=': conversion from 'uint64_t' to 'int', possible loss of data
-E:\Graduation-Thesis-HUST\ObfuGuard\obfuscatecff\obfuscatecff.cpp(331,25): warning C4244: 'initializing': conversion from 'uint64_t' to 'int', possible loss of data
-E:\Graduation-Thesis-HUST\ObfuGuard\obfuscatecff\obfuscatecff.cpp(371,25): warning C4244: 'initializing': conversion from 'uint64_t' to 'int', possible loss of data
-E:\Graduation-Thesis-HUST\ObfuGuard\obfuscatecff\obfuscatecff.cpp(380,25): warning C4244: 'initializing': conversion from 'uint64_t' to 'int', possible loss of data
-E:\Graduation-Thesis-HUST\ObfuGuard\obfuscatecff\obfuscatecff.cpp(536,17): warning C4244: 'initializing': conversion from 'uint64_t' to 'uint32_t', possible loss of data
-E:\Graduation-Thesis-HUST\ObfuGuard\obfuscatecff\obfuscatecff.cpp(541,22): warning C4018: '<': signed/unsigned mismatch
-E:\Graduation-Thesis-HUST\ObfuGuard\obfuscatecff\obfuscatecff.cpp(556,169): warning C4244: '=': conversion from 'ULONGLONG' to 'uint32_t', possible loss of data
-E:\Graduation-Thesis-HUST\ObfuGuard\obfuscatecff\obfuscatecff.cpp(561,9): warning C4477: 'printf' : format string '%i' requires an argument of type 'int', but variadic argument 1 has type 'unsigned __int64'
-      E:\Graduation-Thesis-HUST\ObfuGuard\obfuscatecff\obfuscatecff.cpp(561,9):
-      consider using '%zi' in the format string
-  
+E:\Graduation-Thesis-HUST\ObfuGuard\obfuscatecff\obfuscatecff.cpp(77,75): warning C4244: '=': conversion from 'uint64_t' to 'int', possible loss of data
+E:\Graduation-Thesis-HUST\ObfuGuard\obfuscatecff\obfuscatecff.cpp(312,25): warning C4244: 'initializing': conversion from 'uint64_t' to 'int', possible loss of data
+E:\Graduation-Thesis-HUST\ObfuGuard\obfuscatecff\obfuscatecff.cpp(352,25): warning C4244: 'initializing': conversion from 'uint64_t' to 'int', possible loss of data
+E:\Graduation-Thesis-HUST\ObfuGuard\obfuscatecff\obfuscatecff.cpp(361,25): warning C4244: 'initializing': conversion from 'uint64_t' to 'int', possible loss of data
+E:\Graduation-Thesis-HUST\ObfuGuard\obfuscatecff\obfuscatecff.cpp(518,17): warning C4244: 'initializing': conversion from 'uint64_t' to 'uint32_t', possible loss of data
+E:\Graduation-Thesis-HUST\ObfuGuard\obfuscatecff\obfuscatecff.cpp(523,22): warning C4018: '<': signed/unsigned mismatch
+E:\Graduation-Thesis-HUST\ObfuGuard\obfuscatecff\obfuscatecff.cpp(538,169): warning C4244: '=': conversion from 'ULONGLONG' to 'uint32_t', possible loss of data
   pdbparser.cpp
   pe.cpp
   junkcode.cpp
@@ -70,11 +66,11 @@ D:\vcpkg\installed\x64-windows\include\LIEF\PE\ResourcesManager.hpp(72,15): warn
 D:\vcpkg\installed\x64-windows\include\LIEF\PE\LoadConfigurations\LoadConfiguration.hpp(178,12): warning C4244: 'return': conversion from 'const uint64_t' to 'uint32_t', possible loss of data
   (compiling source file 'junkcode/junkcode.cpp')
   
-E:\Graduation-Thesis-HUST\ObfuGuard\junkcode\junkcode.cpp(216,51): warning C4244: 'initializing': conversion from 'const int64_t' to 'int32_t', possible loss of data
-E:\Graduation-Thesis-HUST\ObfuGuard\junkcode\junkcode.cpp(238,47): warning C4244: 'initializing': conversion from 'const int64_t' to 'int32_t', possible loss of data
+E:\Graduation-Thesis-HUST\ObfuGuard\junkcode\junkcode.cpp(222,51): warning C4244: 'initializing': conversion from 'const int64_t' to 'int32_t', possible loss of data
+E:\Graduation-Thesis-HUST\ObfuGuard\junkcode\junkcode.cpp(245,47): warning C4244: 'initializing': conversion from 'const int64_t' to 'int32_t', possible loss of data
   Generating code
   Previous IPDB not found, fall back to full compilation.
-  All 2733 functions were compiled because no usable IPDB/IOBJ from previous compilation was found.
+  All 3021 functions were compiled because no usable IPDB/IOBJ from previous compilation was found.
   Finished generating code
   ObfuGuard.vcxproj -> E:\Graduation-Thesis-HUST\x64\Release\ObfuGuard-con.exe
   'pwsh.exe' is not recognized as an internal or external command,
