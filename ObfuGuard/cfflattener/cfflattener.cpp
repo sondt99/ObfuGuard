@@ -4,35 +4,8 @@
 
 
 //detect các lệnh nhảy có điều kiện
-bool is_jmp_conditional(ZydisDecodedInstruction instr) {
-	switch (instr.mnemonic)
-	{
-	case ZYDIS_MNEMONIC_JNBE:
-	case ZYDIS_MNEMONIC_JB:
-	case ZYDIS_MNEMONIC_JBE:
-	case ZYDIS_MNEMONIC_JCXZ:
-	case ZYDIS_MNEMONIC_JECXZ:
-	case ZYDIS_MNEMONIC_JKNZD:
-	case ZYDIS_MNEMONIC_JKZD:
-	case ZYDIS_MNEMONIC_JL:
-	case ZYDIS_MNEMONIC_JLE:
-	case ZYDIS_MNEMONIC_JNB:
-	case ZYDIS_MNEMONIC_JNL:
-	case ZYDIS_MNEMONIC_JNLE:
-	case ZYDIS_MNEMONIC_JNO:
-	case ZYDIS_MNEMONIC_JNP:
-	case ZYDIS_MNEMONIC_JNS:
-	case ZYDIS_MNEMONIC_JNZ:
-	case ZYDIS_MNEMONIC_JO:
-	case ZYDIS_MNEMONIC_JP:
-	case ZYDIS_MNEMONIC_JRCXZ:
-	case ZYDIS_MNEMONIC_JS:
-	case ZYDIS_MNEMONIC_JZ:
-		return true;
-	default:
-		return false;
-	}
-	return false;
+bool is_jmp_conditional(const ZydisDecodedInstruction& instr) {
+	return instr.meta.category == ZYDIS_CATEGORY_COND_BR;
 }
 
 
