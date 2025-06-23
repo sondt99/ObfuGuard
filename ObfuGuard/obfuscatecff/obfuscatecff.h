@@ -5,7 +5,6 @@
 
 #include <map>
 #include <string>
-#include <algorithm>
 #include <unordered_map>
 #include <asmjit/asmjit.h>
 using namespace asmjit;
