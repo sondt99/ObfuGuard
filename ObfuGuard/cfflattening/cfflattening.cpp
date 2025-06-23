@@ -12,10 +12,16 @@ bool obfuscatecff::apply_control_flow_flattening(std::vector<obfuscatecff::funct
 
 	struct basic_block {
 		int block_id;
-		std::vector < obfuscatecff::instruction_t>instructions;
-
+		std::vector<obfuscatecff::instruction_t> instructions;
 		int next_block;
-		int dst_block = -1;
+		int dst_block;
+
+		basic_block()
+			: block_id(-1)      // khởi tạo block_id -1
+			, next_block(-1)    // khởi tạo next_block -1
+			, dst_block(-1)     // khởi tạo dst_block -1
+		{
+		}
 	};
 
 	std::vector<basic_block>blocks;
