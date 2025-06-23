@@ -1,11 +1,11 @@
-#pragma once
+﻿#pragma once
 #include "../pe/pe.h"
 
 #include <string>
 
 class pdbparser {
 private:
-
+	// Chứa thông tin về signature, về tên tệp PDB của tệp đầu vào
 	struct codeviewInfo_t
 	{
 		ULONG CvSignature;
@@ -14,11 +14,11 @@ private:
 		char PdbFileName[ANYSIZE_ARRAY];
 	};
 
-	uint8_t* module_base;
+	uint8_t* module_base; // Lưu trữ địa chỉ cơ sở của PDB sau khi được tải vào bộ nhớ
 
 public:
 
-	struct sym_func {
+	struct sym_func { // Lưu trữ thông tin cơ bản của hàm
 
 		int id;
 
@@ -26,13 +26,7 @@ public:
 		std::string name;
 		uint32_t size;
 		bool obfuscate = true;
-
-		bool ctfflattening = true;
-		bool movobf = true;
-		bool mutateobf = true;
-		bool leaobf = true;
-		bool antidisassembly = true;
-		
+		bool ctfflattening = true;	
 	};
 
 	pdbparser(pe64* pe);
