@@ -75,10 +75,7 @@ void print_banner() {
 }
 
 void print_menu() {
-    std::cout << "Select obfuscation mode:\n";
-    std::cout << "  1. Control Flow Flattening\n";
-    std::cout << "  2. Insert Junk Code - Trampoline\n";
-    std::cout << "  0. Exit\n";
+    std::cout << "Select obfuscation mode:\n  1. Control Flow Flattening\n  2. Insert Junk Code - Trampoline\n  0. Exit\n";
     std::cout << "Enter your choice (0-2): ";
 }
 
@@ -90,7 +87,6 @@ bool get_file_input(const std::string& prompt, std::string& file_path) {
     if (!file_path.empty() && file_path.front() == '"' && file_path.back() == '"') {
         file_path = file_path.substr(1, file_path.length() - 2);
     }
-
     if (!std::filesystem::exists(file_path)) {
         std::cerr << "Error: File '" << file_path << "' does not exist!\n";
         return false;
@@ -157,7 +153,6 @@ bool get_multiple_rvas_interactive(const std::string& input_pe_path,
         return true;
     }
     else {
-        std::cout << "Selection via PDB failed, was canceled by user, PDB not found, or PDB unparsable." << std::endl;
         std::cout << "Please enter RVAs manually or ensure a valid PDB is accessible.\n" << std::endl;
 
         // Nhập thủ công cho nhiều RVAs
@@ -226,7 +221,6 @@ bool get_rva_interactive(const std::string& input_pe_path, uint32_t& rva_out) {
             return true;
         }
         else {
-            std::cout << "Selection via PDB failed, was canceled by user, PDB not found, or PDB unparsable." << std::endl;
             std::cout << "Please enter the RVA manually or ensure a valid PDB is accessible.\n" << std::endl;
             std::cout << "Type rva of function:";
             std::getline(std::cin, input_str);
@@ -273,7 +267,6 @@ bool get_rva_interactive(const std::string& input_pe_path, uint32_t& rva_out) {
 }
 
 // tự động phát hiện kiến trúc tệp PE
-// is64Bit: biến đầu ra lưu trữ kiến trúc
 bool DetectPEArchitecture(const std::string& filePath, bool& is64Bit) {
     std::ifstream peFile(filePath, std::ios::binary);
     if (!peFile.is_open()) {
@@ -361,30 +354,48 @@ bool DetectPEArchitecture(const std::string& filePath, bool& is64Bit) {
     }
 }
 
+// Hàm lấy và kiểm tra file PE
+bool get_valid_pe_file_path(const std::string& prompt, std::string& path, bool& is_64_bit) {
+    if (!get_file_input(prompt, path)) return false;
+    if (!DetectPEArchitecture(path, is_64_bit)) {
+        std::cerr << "Failed to determine PE architecture for " << path << ".\n";
+        return false;
+    }
+    return true;
+}
+
+// Hàm tạo output file path
+std::string build_output_path(const std::string& input_path, const std::string& suffix) {
+    std::filesystem::path p(input_path);
+    std::string stem = p.stem().string();
+    std::string extension = p.extension().string();
+    return (p.has_parent_path() ?
+        (p.parent_path() / (stem + suffix + extension)) :
+        std::filesystem::path(stem + suffix + extension)).lexically_normal().string();
+}
+
+// Hàm in thời gian thực thi
+void print_execution_time(clock_t begin_time, const std::string& mode_name) {
+    std::cout << mode_name << " completed in "
+        << static_cast<float>(clock() - begin_time) / CLOCKS_PER_SEC
+        << " seconds." << std::endl;
+}
+
 // hàm chính cho chế độ làm rối mã điều khiển luồng (CFF - Control Flow Flattening)
 int mode_control_flow_flattening() {
-    std::cout << "\n=== Original Obfuscation (Control Flow Flattening) Mode ===\n";
+    std::cout << "\n=== Control Flow Flattening Mode ===\n";
     std::string binary_path;
+    bool is_64_bit;
 
-    if (!get_file_input("Enter PE file path for CFF: ", binary_path)) {
+    if (!get_valid_pe_file_path("Enter PE file path for CFF: ", binary_path, is_64_bit) || !is_64_bit) {
         return 1;
     }
+
+    std::cout << "Control Flow Flattening Mode: Detected 64-bit PE" << std::endl;
 
     const clock_t begin_time = clock(); // Bắt đầu tính thời gian thực hiện
 
     try {
-        // Kiểm tra kiến trúc của tệp PE
-        bool is_input_64_bit_cff;
-        if (!DetectPEArchitecture(binary_path, is_input_64_bit_cff)) {
-            std::cerr << "Control Flow Flattening Mode: Failed to determine PE architecture for " << binary_path << ". Aborting." << std::endl;
-            return 1;
-        }
-        if (!is_input_64_bit_cff) {
-            std::cerr << "Control Flow Flattening Mode: Input file " << binary_path << " is 32-bit. This mode currently expects a 64-bit PE file. Aborting." << std::endl;
-            return 1;
-        }
-        std::cout << "Control Flow Flattening Mode: Detected 64-bit PE" << std::endl;
-
         pe64 pe(binary_path);
 
         pdbparser pdb(&pe);
@@ -407,16 +418,8 @@ int mode_control_flow_flattening() {
         obf.run(new_section, true); // Chạy làm rối mã điều khiển luồng (CFF) với section mới và tạo hàm bổ sung
 
         // Lưu tệp PE đã làm rối
-        std::filesystem::path p(binary_path);
-        std::string stem = p.stem().string();
-        std::string extension = p.extension().string();
-        std::string output_filename_str;
-        if (p.has_parent_path()) {
-            output_filename_str = (p.parent_path() / (stem + ".cff" + extension)).lexically_normal().string();
-        }
-        else {
-            output_filename_str = (std::filesystem::path(stem + ".cff" + extension)).lexically_normal().string();
-        }
+        std::string output_filename_str = build_output_path(binary_path, ".cff");
+
         std::cout << "\nSuccessfully control-flow-flattened " << functions.size() << " selected function(s)." << std::endl;
         std::cout << "Output saved to: " << output_filename_str << std::endl;
         pe.save_to_disk(output_filename_str, new_section, obf.get_added_size());
@@ -430,41 +433,27 @@ int mode_control_flow_flattening() {
         return 1;
     }
 
-    std::cout << "Control Flow Flattening mode completed in " << static_cast<float>(clock() - begin_time) / CLOCKS_PER_SEC << " seconds." << std::endl;
+    print_execution_time(begin_time, "Control Flow Flattening mode"); 
     return 0;
 }
 
 // Hàm chính cho chế độ chèn mã rối (Junk Code) với Trampoline
 int mode_trampoline_junkcode() {
-    std::cout << "\n=== Insert Trampoline with Junk Code Mode ===\n";
+    std::cout << "\n=== Junk Code Injection with Trampoline Mode ===\n";
     std::string input_pe_path;
-    std::string output_pe_path_str;
     bool is_64_bit;
 
-    if (!get_file_input("Enter input PE file path: ", input_pe_path)) {
-        return 1;
-    }
-
-    if (!DetectPEArchitecture(input_pe_path, is_64_bit)) {
-        std::cerr << "Failed to determine PE architecture for " << input_pe_path << ". Aborting trampoline mode.\n";
+    if (!get_valid_pe_file_path("Enter input PE file path: ", input_pe_path, is_64_bit)) {
         return 1;
     }
 
     std::cout << "Junk Code Injection Mode: Detected: " << (is_64_bit ? "64-bit" : "32-bit") << " PE file\n";
 
-    std::filesystem::path p_input(input_pe_path);
-    std::string stem = p_input.stem().string();
-    std::string extension = p_input.extension().string();
-    output_pe_path_str = (p_input.has_parent_path() ?
-        (p_input.parent_path() / (stem + ".junk" + extension)) :
-        std::filesystem::path(stem + ".junk" + extension)).lexically_normal().string();
+    std::string output_pe_path_str = build_output_path(input_pe_path, ".junk");
 
     // Lựa chọn chế độ tự động hay thủ công
     std::string mode_choice;
-    std::cout << "\nSelect injection mode:\n";
-    std::cout << "  1. Auto-inject functions\n";
-    std::cout << "  2. Manually choose multiple functions\n";
-    std::cout << "Enter your choice (1 or 2): ";
+    std::cout << "\nSelect injection mode:\n  1. Auto-inject functions\n  2. Manually choose multiple functions\nEnter your choice (1 or 2): ";
     std::getline(std::cin, mode_choice);
 
     const clock_t begin_time = clock();
@@ -501,7 +490,6 @@ int mode_trampoline_junkcode() {
             if (skipped_count > 0) {
                 std::cout << "Info: Skipped " << skipped_count << " blacklisted/dangerous functions." << std::endl;
             }
-
 
             // Sắp xếp các hàm theo kích thước giảm dần
             std::sort(size_sorted_functions.begin(), size_sorted_functions.end(),
@@ -542,14 +530,7 @@ int mode_trampoline_junkcode() {
 
             // Chèn thông minh với tự động giới hạn các hàm
             uint32_t actual_injected_count = 0;
-            bool result = TrampolineInjector::inject_trampoline_to_multiple_functions_smart(
-                input_pe_path,
-                output_pe_path_str,
-                function_rvas,
-                function_names,
-                actual_injected_count,
-                is_64_bit
-            );
+            bool result = TrampolineInjector::inject_trampoline_to_multiple_functions_smart(input_pe_path, output_pe_path_str, function_rvas, function_names, actual_injected_count, is_64_bit);
 
             if (!result) {
                 std::cerr << "Smart Auto-injection failed!\n";
@@ -584,16 +565,9 @@ int mode_trampoline_junkcode() {
                     return 1;
                 }
 
-                // Chèn thông minh
+                // Chèn tự động
                 uint32_t actual_injected_count = 0;
-                bool result = TrampolineInjector::inject_trampoline_to_multiple_functions_smart(
-                    input_pe_path,
-                    output_pe_path_str,
-                    function_rvas,
-                    function_names,
-                    actual_injected_count,
-                    is_64_bit
-                );
+                bool result = TrampolineInjector::inject_trampoline_to_multiple_functions_smart(input_pe_path, output_pe_path_str, function_rvas, function_names, actual_injected_count, is_64_bit);
 
                 if (!result) {
                     std::cerr << "Smart Manual Injection failed!\n";
@@ -605,13 +579,7 @@ int mode_trampoline_junkcode() {
             }
             else {
                 // Chèn thường - giới hạn chấp nhận được
-                bool result = TrampolineInjector::inject_trampoline_to_multiple_functions(
-                    input_pe_path,
-                    output_pe_path_str,
-                    function_rvas,
-                    function_names,
-                    is_64_bit
-                );
+                bool result = TrampolineInjector::inject_trampoline_to_multiple_functions(input_pe_path, output_pe_path_str, function_rvas, function_names, is_64_bit);
 
                 if (!result) {
                     std::cerr << "Manual Functions Injection failed!\n";
@@ -634,45 +602,22 @@ int mode_trampoline_junkcode() {
         return 1;
     }
 
-    std::cout << "Junk Code Injection mode completed in " << static_cast<float>(clock() - begin_time) / CLOCKS_PER_SEC << " seconds.\n";
+    print_execution_time(begin_time, "Junk Code Injection mode");
     return 0;
 }
 
 int main() {
-    srand(static_cast<unsigned int>(time(NULL)));
+    srand(static_cast<unsigned int>(time(nullptr)));
+    print_banner(); print_menu();
 
-    print_banner();
+    std::string choice_str; std::getline(std::cin, choice_str);
+    int choice = (choice_str.size() == 1 && std::isdigit(choice_str[0])) ? choice_str[0] - '0' : -1;
 
-    std::string choice_str;
-    int choice_num = -1;
-
-    print_menu();
-    std::getline(std::cin, choice_str);
-
-    try {
-        if (choice_str.length() == 1 && std::isdigit(choice_str[0])) {
-            choice_num = std::stoi(choice_str);
-        }
-        else {
-            choice_num = -1;
-        }
+    switch (choice) {
+    case 1: return mode_control_flow_flattening();
+    case 2: return mode_trampoline_junkcode();
+    case 0: std::cout << "Exiting ObfuGuard by sondt. Goodbye!\n"; return 0;
+    default: std::cerr << "Error: Invalid choice. Please enter a number from the menu.\n"; return 1;
     }
-    catch (...) {
-        choice_num = -1;
-    }
-
-    if (choice_num == 1) {
-        mode_control_flow_flattening();
-    }
-    else if (choice_num == 2) {
-        mode_trampoline_junkcode();
-    }
-    else if (choice_num == 0) {
-        std::cout << "Exiting ObfuGuard by sondt. Goodbye!\n";
-    }
-    else {
-        std::cerr << "Error: Invalid choice. Please enter a number from the menu.\n";
-    }
-
-    return 0;
 }
+
