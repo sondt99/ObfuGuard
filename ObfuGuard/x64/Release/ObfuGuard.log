@@ -70,7 +70,7 @@ E:\Graduation-Thesis-HUST\ObfuGuard\junkcode\junkcode.cpp(222,51): warning C4244
 E:\Graduation-Thesis-HUST\ObfuGuard\junkcode\junkcode.cpp(245,47): warning C4244: 'initializing': conversion from 'const int64_t' to 'int32_t', possible loss of data
   Generating code
   Previous IPDB not found, fall back to full compilation.
-  All 3021 functions were compiled because no usable IPDB/IOBJ from previous compilation was found.
+  All 3020 functions were compiled because no usable IPDB/IOBJ from previous compilation was found.
   Finished generating code
   ObfuGuard.vcxproj -> E:\Graduation-Thesis-HUST\x64\Release\ObfuGuard-con.exe
   'pwsh.exe' is not recognized as an internal or external command,
