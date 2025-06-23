@@ -138,7 +138,7 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ClCompile Include="cfflattener\cfflattener.cpp" />
+    <ClCompile Include="cfflattening\cfflattening.cpp" />
     <ClCompile Include="func2rva\func2rva.cpp" />
     <ClCompile Include="main.cpp" />
     <ClCompile Include="obfuscatecff\obfuscatecff.cpp" />
@@ -147,7 +147,7 @@
     <ClCompile Include="junkcode\junkcode.cpp" />
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="cfflattener\cfflattener.h" />
+    <ClInclude Include="cfflattening\cfflattening.h" />
     <ClInclude Include="func2rva\func2rva.h" />
     <ClInclude Include="obfuscatecff\obfuscatecff.h" />
     <ClInclude Include="junkcode\junkcode.h" />
