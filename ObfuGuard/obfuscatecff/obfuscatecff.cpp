@@ -24,7 +24,9 @@ __forceinline int _strcmp(const char* s1, const char* s2)
 }
 
 // Hàm khởi tạo obfuscatecff với đối tượng pe64
-obfuscatecff::obfuscatecff(pe64* pe) {
+obfuscatecff::obfuscatecff(pe64* pe) 
+    : total_size_used(0) // khởi tạo total_size_used 0
+{
 	this->pe = pe;
 	if (!ZYAN_SUCCESS(ZydisDecoderInit(&decoder, ZYDIS_MACHINE_MODE_LONG_64, ZYDIS_STACK_WIDTH_64)))
 		throw std::runtime_error("failed to init decoder");
