@@ -1,44 +1,45 @@
 ﻿#include "../obfuscatecff/obfuscatecff.h"
-
 #include <random>
-
+#include <vector>
 
 //detect các lệnh nhảy có điều kiện
 bool is_jmp_conditional(const ZydisDecodedInstruction& instr) {
 	return instr.meta.category == ZYDIS_CATEGORY_COND_BR;
 }
 
-
 // áp dụng thuật toán làm phẳng luồng
 bool obfuscatecff::apply_control_flow_flattening(std::vector<obfuscatecff::function_t>::iterator& func) {
 
-	struct block_t {
+	struct basic_block {
 		int block_id;
 		std::vector < obfuscatecff::instruction_t>instructions;
 
 		int next_block;
 		int dst_block = -1;
-
 	};
 
-	std::vector<block_t>blocks;
+	std::vector<basic_block>blocks;
 	std::vector<int>block_starts;
-	block_t block;
+	basic_block block;
 	int block_iterator = 0;
 
+	// Thu thập các điểm bắt đầu basic-block nội tại hàm
+	for (const auto& inst : func->instructions)
+	{
+		// Chỉ quan tâm tới những nhảy có đích vẫn nằm trong cùng hàm
+		if (inst.relative.target_func_id != func->func_id)
+			continue;
 
-	// thực hiện khởi tạo vector block_start
+		const auto& meta = inst.zyinstr.info;
 
-	for (auto instruction = func->instructions.begin(); instruction != func->instructions.end(); instruction++) {
+		const bool condJump = is_jmp_conditional(meta);
+		const bool shortJmp = (meta.mnemonic == ZYDIS_MNEMONIC_JMP) &&
+			meta.raw.imm &&              // bảo đảm tồn tại immediate
+			meta.raw.imm->size == 8;     // JMP ngắn 8-bit
 
-		if (is_jmp_conditional(instruction->zyinstr.info) || (instruction->zyinstr.info.mnemonic == ZYDIS_MNEMONIC_JMP && instruction->zyinstr.info.raw.imm->size == 8)) {
-
-			if (instruction->relative.target_func_id == func->func_id) {
-				block_starts.push_back(instruction->relative.target_inst_id);
-			}
-		}
+		if (condJump || shortJmp)
+			block_starts.emplace_back(inst.relative.target_inst_id);
 	}
-
 
 	// detect các block trong hàm
 	for (auto instruction = func->instructions.begin(); instruction != func->instructions.end(); instruction++) {
@@ -70,21 +71,24 @@ bool obfuscatecff::apply_control_flow_flattening(std::vector<obfuscatecff::funct
 		}
 	}
 
-	// xây dựng liên kết giữa các block
-	for (auto curr_block = blocks.begin(); curr_block != blocks.end(); curr_block++) {
+	// Xây dựng liên kết giữa các block
+	for (auto& block : blocks) {
+		// Mặc định block kế tiếp là block có ID + 1
+		block.next_block = block.block_id + 1;
 
-		auto last_instruction = curr_block->instructions.end() - 1;
-		curr_block->next_block = curr_block->block_id + 1;
+		auto& last_inst = block.instructions.back();
 
+		// Xử lý lệnh nhảy có điều kiện
+		if (last_inst.isjmpcall && is_jmp_conditional(last_inst.zyinstr.info)) {
 
-		if (last_instruction->isjmpcall && is_jmp_conditional(last_instruction->zyinstr.info)) {
-			for (auto curr_block2 = blocks.begin(); curr_block2 != blocks.end(); curr_block2++) {
+			// Tìm block đích của lệnh nhảy
+			auto target_block = std::find_if(blocks.begin(), blocks.end(),
+				[&](const auto& blk) {
+					return blk.instructions.front().inst_id == last_inst.relative.target_inst_id;
+				});
 
-				auto first_instruction = curr_block2->instructions.begin();
-				if (first_instruction->inst_id == last_instruction->relative.target_inst_id) {
-					curr_block->dst_block = curr_block2->block_id;
-					break;
-				}
+			if (target_block != blocks.end()) {
+				block.dst_block = target_block->block_id;
 			}
 		}
 	}
@@ -98,10 +102,7 @@ bool obfuscatecff::apply_control_flow_flattening(std::vector<obfuscatecff::funct
 	auto rng = std::default_random_engine{};
 	std::shuffle(blocks.begin(), blocks.end(), rng);
 
-
-
 	// thực hiện tái cấu trúc luồng với bộ điều phối thông qua so sánh với biến trạng thái rax
-
 	instruction_t push_rax{}; push_rax.load(func->func_id, { 0x50 });
 	push_rax.inst_id = first_inst_id;
 	push_rax.is_first_instruction = false;
@@ -130,88 +131,100 @@ bool obfuscatecff::apply_control_flow_flattening(std::vector<obfuscatecff::funct
 		it = it + 4;
 	}
 
+	// Cấu hình lại các lệnh nhảy có điều kiện JNZ trong bộ điều phối
+	auto configure_dispatcher_jumps = [&](auto dispatcher_end_iterator) {
+		constexpr int DISPATCHER_BLOCK_SIZE = 4; // Kích thước mỗi khối so sánh trong dispatcher
 
+		for (auto inst_iter = func->instructions.begin(); inst_iter <= dispatcher_end_iterator; ++inst_iter) {
 
-	for (auto inst = func->instructions.begin(); inst != it + 1; inst++) {
+			// Kiểm tra xem có phải lệnh JNZ (Jump if Not Zero) không
+			if (inst_iter->zyinstr.info.mnemonic == ZYDIS_MNEMONIC_JNZ) {
 
-		if (inst->zyinstr.info.mnemonic == ZYDIS_MNEMONIC_JNZ) {
-			auto dst = inst + 4;
+				// Tính toán vị trí đích nhảy (bỏ qua khối dispatcher hiện tại)
+				auto jump_target_iter = inst_iter + DISPATCHER_BLOCK_SIZE;
 
-			inst->relative.target_func_id = func->func_id;
-			inst->relative.target_inst_id = dst->inst_id;
+				// Đảm bảo không vượt quá phạm vi hợp lệ
+				if (jump_target_iter <= dispatcher_end_iterator) {
+					inst_iter->relative.target_func_id = func->func_id;
+					inst_iter->relative.target_inst_id = jump_target_iter->inst_id;
+				}
+			}
 		}
-	}
+		};
 
+	// Gọi hàm cấu hình với iterator kết thúc dispatcher
+	configure_dispatcher_jumps(it);
 
-	// cấu hình lại các block để nó trở lại bộ điều phối sau khi thực hiện xong
-	for (auto current_block = blocks.begin(); current_block != blocks.end() - 1; current_block++) {
+	// Hàm hỗ trợ tạo chuỗi lệnh chuyển về bộ điều phối
+	auto create_dispatcher_transition = [&](int target_block_id) -> std::vector<instruction_t> {
+		std::vector<instruction_t> transition_sequence;
 
-		auto last_instruction = std::find_if(func->instructions.begin(), func->instructions.end(), [&](obfuscatecff::instruction_t it) {
-			return it.inst_id == (current_block->instructions.end() - 1)->inst_id;
+		// Lưu trạng thái thanh ghi
+		instruction_t preserve_rax{};
+		preserve_rax.load(func->func_id, { 0x50 }); // push rax - đẩy rax vào stack
+
+		instruction_t preserve_flags{};
+		preserve_flags.load(func->func_id, { 0x66, 0x9C }); // pushf - đẩy flags vào stack
+
+		// Nạp ID của block đích vào thanh ghi EAX
+		instruction_t load_state{};
+		load_state.load(func->func_id, { 0xB8, 0x00, 0x00, 0x00, 0x00 }); // mov eax, imm32
+		*(uint32_t*)(&load_state.raw_bytes.data()[1]) = target_block_id;
+
+		// Nhảy trở lại bộ điều phối
+		instruction_t return_to_dispatcher{};
+		return_to_dispatcher.load(func->func_id, { 0xE9, 0x00, 0x00, 0x00, 0x00 }); // jmp rel32
+		return_to_dispatcher.relative.target_func_id = func->func_id;
+		return_to_dispatcher.relative.target_inst_id = (func->instructions.begin() + 3)->inst_id;
+
+		transition_sequence = { preserve_rax, preserve_flags, load_state, return_to_dispatcher };
+		return transition_sequence;
+		};
+
+	// Cấu hình lại các block để trở về bộ điều phối sau khi thực hiện xong
+	for (auto block_iter = blocks.begin(); block_iter != blocks.end() - 1; block_iter++) {
+
+		// Tìm lệnh cuối cùng của block hiện tại
+		auto last_inst = std::find_if(func->instructions.begin(), func->instructions.end(),
+			[&](const obfuscatecff::instruction_t& inst) {
+				return inst.inst_id == (block_iter->instructions.end() - 1)->inst_id;
 			});
 
-		auto next_block = std::find_if(blocks.begin(), blocks.end(), [&](const block_t block) {return block.block_id == current_block->next_block; });
-		if (next_block == blocks.end()) continue;
+		// Tìm block kế tiếp trong chuỗi thực thi
+		auto next_block_iter = std::find_if(blocks.begin(), blocks.end(),
+			[&](const basic_block& blk) { return blk.block_id == block_iter->next_block; });
 
-		if (is_jmp_conditional(last_instruction->zyinstr.info) && current_block->dst_block != -1) {
+		if (next_block_iter == blocks.end()) continue;
 
-			auto dst_block = std::find_if(blocks.begin(), blocks.end(), [&](const block_t block) {return block.block_id == current_block->dst_block; });
+		// Xử lý các lệnh nhảy có điều kiện với 2 đích
+		if (is_jmp_conditional(last_inst->zyinstr.info) && block_iter->dst_block != -1) {
 
-			{
-				instruction_t push_rax{}; push_rax.load(func->func_id, { 0x50 });
+			auto dst_block_iter = std::find_if(blocks.begin(), blocks.end(),
+				[&](const basic_block& blk) { return blk.block_id == block_iter->dst_block; });
 
-				instruction_t push_f{}; push_f.load(func->func_id, { 0x66, 0x9C });
+			// Tạo chuyển tiếp cho đường đi fall-through (không nhảy)
+			auto fallthrough_transition = create_dispatcher_transition(next_block_iter->block_id);
+			last_inst = func->instructions.insert(last_inst + 1,
+				fallthrough_transition.begin(), fallthrough_transition.end());
+			last_inst += fallthrough_transition.size() - 1;
 
-				instruction_t mov_eax{}; mov_eax.load(func->func_id, { 0xB8, 0x00,0x00,0x00,0x00 });
-				*(uint32_t*)(&mov_eax.raw_bytes.data()[1]) = next_block->block_id;
+			// Tạo chuyển tiếp cho đường đi branch target (có nhảy)
+			auto branch_transition = create_dispatcher_transition(dst_block_iter->block_id);
+			last_inst = func->instructions.insert(last_inst + 1,
+				branch_transition.begin(), branch_transition.end());
+			last_inst += branch_transition.size() - 1;
 
-				instruction_t jmp{}; jmp.load(func->func_id, { 0xE9, 0x00,0x00,0x00,0x00 });
-				jmp.relative.target_func_id = func->func_id;
-				jmp.relative.target_inst_id = (func->instructions.begin() + 3)->inst_id;
-
-				last_instruction = func->instructions.insert(last_instruction + 1, { push_rax , push_f, mov_eax, jmp });
-				last_instruction = last_instruction + 3;
-			}
-
-			{
-
-				instruction_t push_rax{}; push_rax.load(func->func_id, { 0x50 });
-
-				instruction_t push_f{}; push_f.load(func->func_id, { 0x66, 0x9C });
-
-				instruction_t mov_eax{}; mov_eax.load(func->func_id, { 0xB8, 0x00,0x00,0x00,0x00 });
-				*(uint32_t*)(&mov_eax.raw_bytes.data()[1]) = dst_block->block_id;
-
-				instruction_t jmp{}; jmp.load(func->func_id, { 0xE9, 0x00,0x00,0x00,0x00 });
-				jmp.relative.target_func_id = func->func_id;
-				jmp.relative.target_inst_id = (func->instructions.begin() + 3)->inst_id;
-
-				last_instruction = func->instructions.insert(last_instruction + 1, { push_rax , push_f, mov_eax, jmp });
-				last_instruction = last_instruction + 3;
-			}
-
-
-			last_instruction = last_instruction - 8;
-			last_instruction->relative.target_inst_id = (last_instruction + 5)->inst_id;
-
+			// Điều chỉnh lệnh nhảy có điều kiện để nhảy đến branch transition
+			auto conditional_inst = last_inst - (fallthrough_transition.size() + branch_transition.size());
+			conditional_inst->relative.target_inst_id = (last_inst - branch_transition.size() + 1)->inst_id;
 		}
 		else {
-
-			instruction_t push_rax{}; push_rax.load(func->func_id, { 0x50 });
-
-			instruction_t push_f{}; push_f.load(func->func_id, { 0x66, 0x9C });
-
-			instruction_t mov_eax{}; mov_eax.load(func->func_id, { 0xB8, 0x00,0x00,0x00,0x00 });
-			*(uint32_t*)(&mov_eax.raw_bytes.data()[1]) = next_block->block_id;
-
-			instruction_t jmp{}; jmp.load(func->func_id, { 0xE9, 0x00,0x00,0x00,0x00 });
-			jmp.relative.target_func_id = func->func_id;
-			jmp.relative.target_inst_id = (func->instructions.begin() + 3)->inst_id;
-
-			auto it = func->instructions.insert(last_instruction + 1, { push_rax , push_f, mov_eax, jmp });
-			it = it + 3;
+			// Xử lý luồng không điều kiện - chỉ cần 1 chuyển tiếp
+			auto transition_sequence = create_dispatcher_transition(next_block_iter->block_id);
+			auto insertion_point = func->instructions.insert(last_inst + 1,
+				transition_sequence.begin(), transition_sequence.end());
+			insertion_point += transition_sequence.size() - 1;
 		}
 	}
-
 	return true;
 }
