@@ -1,4 +1,5 @@
-﻿  cfflattening.cpp
+﻿C:\Program Files\Microsoft Visual Studio\2022\Community\MSBuild\Microsoft\VC\v170\Microsoft.CppBuild.targets(538,5): warning MSB8028: The intermediate directory (x64\Release\) contains files shared from another project (ObfuGuard-con.vcxproj).  This can lead to incorrect clean and rebuild behavior.
+  cfflattening.cpp
 E:\Graduation-Thesis-HUST\ObfuGuard\obfuscatecff\obfuscatecff.h(74,12): warning C4240: nonstandard extension used: access to 'obfuscatecff::instruction_t' now defined to be 'public', previously it was defined to be 'private'
   (compiling source file 'cfflattening/cfflattening.cpp')
       E:\Graduation-Thesis-HUST\ObfuGuard\obfuscatecff\obfuscatecff.h(14,12):
@@ -72,6 +73,6 @@ E:\Graduation-Thesis-HUST\ObfuGuard\junkcode\junkcode.cpp(251,47): warning C4244
   Previous IPDB not found, fall back to full compilation.
   All 3063 functions were compiled because no usable IPDB/IOBJ from previous compilation was found.
   Finished generating code
-  ObfuGuard.vcxproj -> E:\Graduation-Thesis-HUST\x64\Release\ObfuGuard-con.exe
+  ObfuGuard.vcxproj -> E:\Graduation-Thesis-HUST\x64\Release\ObfuGuard.exe
   'pwsh.exe' is not recognized as an internal or external command,
   operable program or batch file.
