@@ -209,6 +209,82 @@ bool get_multiple_rvas_interactive(const std::string& input_pe_path,
     }
 }
 
+// Hàm lọc các hàm theo size và trả về thông tin chi tiết
+bool filter_functions_by_size(const std::string& input_pe_path,
+    const std::vector<uint32_t>& input_rvas,
+    const std::vector<std::string>& input_names,
+    std::vector<uint32_t>& filtered_rvas,
+    std::vector<std::string>& filtered_names,
+    uint32_t min_size = 5) {
+
+    filtered_rvas.clear();
+    filtered_names.clear();
+
+    try {
+        // Khởi tạo RVAResolver để lấy thông tin size
+        FuncToRVA::RVAResolver resolver(input_pe_path);
+        if (!resolver.initialize()) {
+            std::cerr << "Error: Could not initialize PDB resolver for size filtering.\n";
+            return false;
+        }
+
+        const auto& all_functions = resolver.get_functions_info();
+        std::vector<std::string> excluded_functions;
+        std::vector<uint32_t> excluded_sizes;
+
+        for (size_t i = 0; i < input_rvas.size(); ++i) {
+            uint32_t rva = input_rvas[i];
+            const std::string& name = input_names[i];
+
+            // Tìm thông tin size từ all_functions
+            auto it = std::find_if(all_functions.begin(), all_functions.end(),
+                [rva](const FuncToRVA::FunctionInfo& func) { return func.rva == rva; });
+
+            if (it != all_functions.end()) {
+                if (it->size >= min_size) {
+                    filtered_rvas.push_back(rva);
+                    filtered_names.push_back(name);
+                }
+                else {
+                    excluded_functions.push_back(name);
+                    excluded_sizes.push_back(it->size);
+                }
+            }
+            else {
+                // Không tìm thấy trong PDB, có thể là manual RVA
+                // Bỏ qua việc lọc cho manual RVA để tránh false positive
+                std::cout << "Warning: Could not find size info for " << name << " (RVA: 0x"
+                    << std::hex << rva << std::dec << "). Adding to filtered list." << std::endl;
+                filtered_rvas.push_back(rva);
+                filtered_names.push_back(name);
+            }
+        }
+
+        // Hiển thị kết quả lọc
+        if (!excluded_functions.empty()) {
+            std::cout << "\n=== Size Filtering Results ===" << std::endl;
+            std::cout << "Excluded " << excluded_functions.size() << " function(s) with size < " << min_size << " bytes:" << std::endl;
+            for (size_t i = 0; i < excluded_functions.size(); ++i) {
+                std::cout << "  - " << excluded_functions[i] << " (size: " << excluded_sizes[i] << " bytes)" << std::endl;
+            }
+            std::cout << std::endl;
+        }
+
+        if (filtered_rvas.empty()) {
+            std::cout << "Warning: No functions remain after size filtering (min size: " << min_size << " bytes)." << std::endl;
+            return false;
+        }
+
+        std::cout << "After filtering: " << filtered_rvas.size() << " function(s) with size >= " << min_size << " bytes" << std::endl;
+        return true;
+
+    }
+    catch (const std::exception& e) {
+        std::cerr << "Error during size filtering: " << e.what() << std::endl;
+        return false;
+    }
+}
+
 // Hàm để lấy RVA tương tác từ người dùng - phục vụ cho việc chọn duy nhất một hàm để làm rối
 bool get_rva_interactive(const std::string& input_pe_path, uint32_t& rva_out) {
     std::string input_str;
@@ -433,7 +509,7 @@ int mode_control_flow_flattening() {
         return 1;
     }
 
-    print_execution_time(begin_time, "Control Flow Flattening mode"); 
+    print_execution_time(begin_time, "Control Flow Flattening mode");
     return 0;
 }
 
@@ -547,6 +623,27 @@ int mode_trampoline_junkcode() {
                 return 1;
             }
 
+            // === THÊM PHẦN LỌC SIZE CHO MANUAL MODE ===
+            std::vector<uint32_t> filtered_rvas;
+            std::vector<std::string> filtered_names;
+
+            if (!filter_functions_by_size(input_pe_path, function_rvas, function_names, filtered_rvas, filtered_names, 5)) {
+                std::cerr << "Error: Size filtering failed or no functions remain after filtering.\n";
+                return 1;
+            }
+
+            // Sử dụng filtered list thay vì original list
+            function_rvas = std::move(filtered_rvas);
+            function_names = std::move(filtered_names);
+
+            if (function_rvas.empty()) {
+                std::cerr << "Error: No functions remain after size filtering.\n";
+                return 1;
+            }
+
+            std::cout << "Proceeding with " << function_rvas.size() << " function(s) that meet size requirements." << std::endl;
+            // === KẾT THÚC PHẦN LỌC SIZE ===
+
             // Kiểm tra nếu có thể tiếp tục với các hàm đã chọn
             TrampolineInjector temp_injector;
             if (!temp_injector.load_pe(input_pe_path)) {
@@ -605,6 +702,7 @@ int mode_trampoline_junkcode() {
     print_execution_time(begin_time, "Junk Code Injection mode");
     return 0;
 }
+
 
 int main() {
     srand(static_cast<unsigned int>(time(nullptr)));
