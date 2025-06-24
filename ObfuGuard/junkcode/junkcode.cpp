@@ -507,7 +507,64 @@ bool TrampolineInjector::create_trampoline(uint64_t original_func_va, uint64_t n
         return false;
     }
 
-	// tính vị trí và kích thước của junk code trước khi chèn JMP
+    // KIỂM TRA BOUNDS TRƯỚC KHI BẮT ĐẦU
+    const LIEF::PE::Section* original_section = nullptr;
+
+    try {
+        // 1. Tìm section chứa original function bằng cách loop qua sections
+        for (const LIEF::PE::Section& sec : binary->sections()) {
+            uint64_t sec_va_start = image_base + sec.virtual_address();
+            uint64_t sec_va_end = sec_va_start + sec.virtual_size();
+            if (original_func_va >= sec_va_start && original_func_va < sec_va_end) {
+                original_section = &sec;
+                break;
+            }
+        }
+
+        if (!original_section) {
+            std::cerr << "Error: Can't find section containing VA: 0x" << std::hex << original_func_va << std::dec << std::endl;
+            ks_close(ks);
+            return false;
+        }
+
+        // 2. Kiểm tra bounds của section
+        uint64_t section_start_va = image_base + original_section->virtual_address();
+        uint64_t section_end_va = section_start_va + original_section->virtual_size();
+
+        if (original_func_va + original_size > section_end_va) {
+            std::cerr << "Error: The patch value (" << original_size << " bytes @0x" << std::hex
+                << original_func_va << ") is out of bounds of the section (limit: 0x"
+                << section_end_va << ")" << std::dec << std::endl;
+            ks_close(ks);
+            return false;
+        }
+
+        // 3. Kiểm tra kích thước tối thiểu cần thiết
+        const size_t MIN_PATCH_SIZE = 5; // Đảm bảo xử lý tối thiểu 5 bytes
+        if (original_size < MIN_PATCH_SIZE) {
+            std::cerr << "Error: Original function size (" << original_size
+                << " bytes) is too small for trampoline injection (minimum: "
+                << MIN_PATCH_SIZE << " bytes)" << std::endl;
+            ks_close(ks);
+            return false;
+        }
+
+        // 4. Kiểm tra kích thước hợp lý (tránh patch quá lớn)
+        const size_t MAX_PATCH_SIZE = 0x1000; // 4KB max
+        if (original_size > MAX_PATCH_SIZE) {
+            std::cerr << "Warning: Original function size (" << original_size
+                << " bytes) is very large. Limiting to " << MAX_PATCH_SIZE << " bytes." << std::endl;
+            original_size = MAX_PATCH_SIZE;
+        }
+
+    }
+    catch (const std::exception& e) {
+        std::cerr << "Error during bounds checking: " << e.what() << std::endl;
+        ks_close(ks);
+        return false;
+    }
+
+    // tính vị trí và kích thước của junk code trước khi chèn JMP
     size_t min_junk_before = std::min((size_t)3, original_size / 3);
     size_t max_junk_before = (original_size > 5 + 1) ? (original_size - 5 - 1) : min_junk_before; // 5 bytes for JMP
 
@@ -542,7 +599,7 @@ bool TrampolineInjector::create_trampoline(uint64_t original_func_va, uint64_t n
 
     int32_t relative_offset = static_cast<int32_t>(relative_offset_64);
 
-	// tạo lệnh JMP thủ công
+    // tạo lệnh JMP thủ công
     std::vector<uint8_t> jmp_bytes(5);
     jmp_bytes[0] = 0xE9; // JMP rel32 opcode
     memcpy(jmp_bytes.data() + 1, &relative_offset, sizeof(int32_t));
@@ -558,11 +615,16 @@ bool TrampolineInjector::create_trampoline(uint64_t original_func_va, uint64_t n
 
         uint64_t current_address = original_func_va;
 
-		// patch mã rác (junk) trước lệnh JMP
+        // patch mã rác (junk) trước lệnh JMP với giới hạn iteration
         size_t remaining_before = junk_before_size;
+        size_t junk_iteration_count = 0;
+        const size_t MAX_JUNK_ITERATIONS = 100; // Giới hạn iteration để tránh vô tận
+
         /*std::cout << "Phase 1: Adding " << remaining_before << " bytes of junk before JMP..." << std::endl;*/
 
-        while (remaining_before > 0) {
+        while (remaining_before > 0 && junk_iteration_count < MAX_JUNK_ITERATIONS) {
+            junk_iteration_count++;
+
             std::string junk_asm = get_random_junk_instruction();
             unsigned char* junk_encode = nullptr;
             size_t junk_asm_size = 0;
@@ -570,6 +632,17 @@ bool TrampolineInjector::create_trampoline(uint64_t original_func_va, uint64_t n
 
             if (ks_asm(ks, junk_asm.c_str(), current_address, &junk_encode, &junk_asm_size, &junk_count) == KS_ERR_OK && junk_count > 0) {
                 if (junk_asm_size <= remaining_before) {
+                    // KIỂM TRA BOUNDS TRƯỚC KHI PATCH
+                    uint64_t patch_end = current_address + junk_asm_size;
+                    uint64_t section_start_va = image_base + original_section->virtual_address();
+                    uint64_t section_end_va = section_start_va + original_section->virtual_size();
+
+                    if (patch_end > section_end_va) {
+                        std::cerr << "Error: Junk patch would exceed section bounds. Stopping." << std::endl;
+                        ks_free(junk_encode);
+                        break;
+                    }
+
                     std::vector<uint8_t> junk_bytes(junk_encode, junk_encode + junk_asm_size);
                     binary->patch_address(current_address, junk_bytes);
 
@@ -595,19 +668,41 @@ bool TrampolineInjector::create_trampoline(uint64_t original_func_va, uint64_t n
             }
         }
 
-		// patch lệnh jmp tại địa chỉ hiện tại
+        // Kiểm tra nếu vượt quá iteration limit
+        if (junk_iteration_count >= MAX_JUNK_ITERATIONS) {
+            std::cerr << "Warning: Maximum junk iterations reached. Filling remaining space with NOPs." << std::endl;
+            fill_remaining_space_with_nops(current_address, remaining_before);
+            current_address += remaining_before;
+        }
+
+        // patch lệnh jmp tại địa chỉ hiện tại
         /*std::cout << "Phase 2: Patching JMP at VA 0x" << std::hex << current_address
             << " -> target 0x" << new_func_va << std::dec << std::endl;*/
+
+            // KIỂM TRA BOUNDS CHO JMP
+        uint64_t jmp_patch_end = current_address + jmp_size;
+        uint64_t section_start_va = image_base + original_section->virtual_address();
+        uint64_t section_end_va = section_start_va + original_section->virtual_size();
+
+        if (jmp_patch_end > section_end_va) {
+            std::cerr << "Error: JMP patch would exceed section bounds." << std::endl;
+            ks_close(ks);
+            return false;
+        }
 
         binary->patch_address(current_address, jmp_bytes);
         current_address += jmp_size;
 
-		// patch junkode sau lệnh JMP
+        // patch junkcode sau lệnh JMP với giới hạn iteration
         size_t remaining_after = junk_after_size;
+        junk_iteration_count = 0; // Reset counter
+
         /*std::cout << "Phase 3: Adding " << remaining_after << " bytes of junk after JMP..." << std::endl;*/
 
-		// nếu không có junk sau lệnh JMP, điền bằng NOPs
-        while (remaining_after > 0) {
+        // nếu không có junk sau lệnh JMP, điền bằng NOPs
+        while (remaining_after > 0 && junk_iteration_count < MAX_JUNK_ITERATIONS) {
+            junk_iteration_count++;
+
             std::string junk_asm = get_random_junk_instruction();
             unsigned char* junk_encode = nullptr;
             size_t junk_asm_size = 0;
@@ -615,6 +710,17 @@ bool TrampolineInjector::create_trampoline(uint64_t original_func_va, uint64_t n
 
             if (ks_asm(ks, junk_asm.c_str(), current_address, &junk_encode, &junk_asm_size, &junk_count) == KS_ERR_OK && junk_count > 0) {
                 if (junk_asm_size <= remaining_after) {
+                    // KIỂM TRA BOUNDS TRƯỚC KHI PATCH
+                    uint64_t patch_end = current_address + junk_asm_size;
+                    uint64_t section_start_va = image_base + original_section->virtual_address();
+                    uint64_t section_end_va = section_start_va + original_section->virtual_size();
+
+                    if (patch_end > section_end_va) {
+                        std::cerr << "Error: Final junk patch would exceed section bounds. Stopping." << std::endl;
+                        ks_free(junk_encode);
+                        break;
+                    }
+
                     std::vector<uint8_t> junk_bytes(junk_encode, junk_encode + junk_asm_size);
                     binary->patch_address(current_address, junk_bytes);
 
@@ -638,6 +744,12 @@ bool TrampolineInjector::create_trampoline(uint64_t original_func_va, uint64_t n
             }
         }
 
+        // Kiểm tra nếu vượt quá iteration limit
+        if (junk_iteration_count >= MAX_JUNK_ITERATIONS) {
+            std::cerr << "Warning: Maximum final junk iterations reached. Filling remaining space with NOPs." << std::endl;
+            fill_remaining_space_with_nops(current_address, remaining_after);
+        }
+
         /*std::cout << "Completed advanced trampoline with embedded JMP" << std::endl;*/
         ks_close(ks);
         return true;
@@ -648,7 +760,6 @@ bool TrampolineInjector::create_trampoline(uint64_t original_func_va, uint64_t n
         return false;
     }
 }
-
 // Inject một hàm: relocate mã gốc, tạo section mới, chèn trampoline
 bool TrampolineInjector::inject_function_trampoline(uint32_t function_rva) {
     uint64_t original_function_va = image_base + function_rva;
