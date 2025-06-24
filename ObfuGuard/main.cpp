@@ -11,14 +11,12 @@
 #define NOMINMAX
 #include <windows.h>
 
-// Local includes - đặt sau system includes
 #include "pe/pe.h"
 #include "pdbparser/pdbparser.h"
 #include "obfuscatecff/obfuscatecff.h"
 #include "junkcode/junkcode.h"
 #include "func2rva/func2rva.h"
 
-// In ra banner khi sử dụng công cụ
 void print_banner() {
     std::cout << "========================================\n";
     std::cout << "         ObfuGuard Tool - sondt         \n";
