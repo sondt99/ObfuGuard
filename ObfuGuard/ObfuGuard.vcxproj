@@ -24,7 +24,7 @@
     <ProjectGuid>{3bf811ef-13b1-4b79-b957-6a5c1f9301bc}</ProjectGuid>
     <RootNamespace>Alcatraz</RootNamespace>
     <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
-    <ProjectName>ObfuGuard-con</ProjectName>
+    <ProjectName>ObfuGuard</ProjectName>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'" Label="Configuration">
