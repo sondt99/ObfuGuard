@@ -471,7 +471,7 @@ int mode_trampoline_junkcode() {
             std::vector<uint32_t> function_rvas;
             std::vector<std::string> function_names;
 
-            // Lọc các hàm có kích thước lớn hơn 15 bytes và không bị blacklist
+            // Lọc các hàm có kích thước lớn hơn 5 bytes và không bị blacklist
             std::vector<std::pair<uint32_t, std::string>> size_sorted_functions;
             int skipped_count = 0; // Đếm số hàm đã bỏ qua
 
@@ -482,7 +482,7 @@ int mode_trampoline_junkcode() {
                 }
                 std::cout << "PASS " << func_info.name << std::endl;
 
-                if (func_info.size > 15) { // Chỉ lấy các hàm có kích thước lớn hơn 15 bytes
+                if (func_info.size > 5) { // Chỉ lấy các hàm có kích thước lớn hơn 5 bytes
                     size_sorted_functions.push_back({ func_info.size, func_info.name });
                 }
             }
