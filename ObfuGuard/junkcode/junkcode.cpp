@@ -1,4 +1,7 @@
-﻿#include "junkcode.h"
+﻿// Đặt include theo thứ tự này
+#include "junkcode.h"
+
+// System includes
 #include <iostream>
 #include <fstream>
 #include <vector>
@@ -8,9 +11,17 @@
 #include <algorithm>
 #include <cstdlib>
 #include <ctime>
+#include <sstream>
+#include <set>
+#define NOMINMAX
+
+// Third-party includes
 #include <LIEF/LIEF.hpp>
 #include <capstone/capstone.h>
 #include <keystone/keystone.h>
+
+// Local includes
+#include "../func2rva/func2rva.h"
 
 // Hàm khởi tạo/Hàm huỷ
 TrampolineInjector::TrampolineInjector() : binary(nullptr), image_base(0), is_64_bit(false) {
@@ -62,15 +73,15 @@ uint32_t TrampolineInjector::calculate_max_injectable_functions() const {
         return 0;
     }
 
-    const uint32_t PE_MAX_SECTIONS = 96;        
-    const uint32_t SAFETY_MARGIN = 10;        
-    const uint32_t RESERVED_FOR_SYSTEM = 5;    
+    const uint32_t PE_MAX_SECTIONS = 96;
+    const uint32_t SAFETY_MARGIN = 10;
+    const uint32_t RESERVED_FOR_SYSTEM = 5;
 
     uint32_t current_sections = get_current_section_count();
     uint32_t max_usable_sections = PE_MAX_SECTIONS - SAFETY_MARGIN - RESERVED_FOR_SYSTEM;
 
     if (current_sections >= max_usable_sections) {
-		return 0; // Không thể chèn thêm hàm nào nếu đã đạt giới hạn
+        return 0; // Không thể chèn thêm hàm nào nếu đã đạt giới hạn
     }
 
     return max_usable_sections - current_sections;
@@ -81,7 +92,7 @@ bool TrampolineInjector::check_section_limit_before_injection(uint32_t planned_i
     uint32_t max_injectable = calculate_max_injectable_functions();
 
     std::cout << "Section Analysis:  Current sections: " << get_current_section_count() << "  Injectable functions: " << max_injectable << std::endl;
-	std::cout << "Junk Code Injection with Trampoline Mode" << std::endl;
+    std::cout << "Junk Code Injection with Trampoline Mode" << std::endl;
 
     if (planned_injections > max_injectable) {
         // std::cout << "  Status: EXCEEDS LIMIT - Will auto-limit to " << max_injectable << " functions" << std::endl;
@@ -105,7 +116,7 @@ bool TrampolineInjector::get_and_relocate_original_function_code(
 
     const LIEF::PE::Section* original_section = nullptr;
 
-	// Kiểm tra xem địa chỉ VA có hợp lệ không
+    // Kiểm tra xem địa chỉ VA có hợp lệ không
     /*std::cout << "Info: Searching for section containing VA 0x" << std::hex << original_func_va << std::dec << std::endl;*/
     for (const LIEF::PE::Section& sec : binary->sections()) {
         uint64_t sec_va_start = image_base + sec.virtual_address();
@@ -116,7 +127,7 @@ bool TrampolineInjector::get_and_relocate_original_function_code(
         }
     }
 
-	// Nếu không tìm thấy section chứa địa chỉ VA, báo lỗi
+    // Nếu không tìm thấy section chứa địa chỉ VA, báo lỗi
     if (!original_section) {
         std::cerr << "Error: Could not find section containing original function VA: 0x" << std::hex << original_func_va << std::endl;
         return false;
@@ -124,8 +135,8 @@ bool TrampolineInjector::get_and_relocate_original_function_code(
     /*std::cout << "Found section '" << original_section->name() << "' for VA 0x" << std::hex << original_func_va << std::dec << std::endl;*/
 
 
-	uint64_t section_base_va = image_base + original_section->virtual_address(); // Tính toán địa chỉ VA bắt đầu của section
-	uint64_t offset_in_section = original_func_va - section_base_va; // Tính toán offset của hàm trong section
+    uint64_t section_base_va = image_base + original_section->virtual_address(); // Tính toán địa chỉ VA bắt đầu của section
+    uint64_t offset_in_section = original_func_va - section_base_va; // Tính toán offset của hàm trong section
 
     uint64_t max_read_size = 0;
     uint64_t section_content_limit = original_section->size();
@@ -139,7 +150,7 @@ bool TrampolineInjector::get_and_relocate_original_function_code(
         return false;
     }
 
-	// Kiểm tra xem kích thước đọc tối đa có hợp lệ không
+    // Kiểm tra xem kích thước đọc tối đa có hợp lệ không
     if (max_read_size == 0) {
         std::cerr << "Error: Max read size is 0 for VA 0x" << std::hex << original_func_va << " in section " << original_section->name() << std::endl;
         return false;
@@ -152,14 +163,14 @@ bool TrampolineInjector::get_and_relocate_original_function_code(
         return false;
     }
 
-	csh cs_handle; // Xử lý capstone
+    csh cs_handle; // Xử lý capstone
 
     cs_mode capstone_mode = is_64_bit ? CS_MODE_64 : CS_MODE_32;
     if (cs_open(CS_ARCH_X86, capstone_mode, &cs_handle) != CS_ERR_OK) {
         std::cerr << "Error: Failed to initialize Capstone." << std::endl;
         return false;
     }
-	// Bật chế độ chi tiết để lấy thông tin về các toán hạng
+    // Bật chế độ chi tiết để lấy thông tin về các toán hạng
     cs_option(cs_handle, CS_OPT_DETAIL, CS_OPT_ON);
 
     cs_insn* insn;
@@ -169,15 +180,15 @@ bool TrampolineInjector::get_and_relocate_original_function_code(
     const size_t MAX_FUNC_SCAN_SIZE = 8192;
     const uint8_t* code_ptr = function_raw_bytes_span.data();
     size_t code_available_size = function_raw_bytes_span.size();
-    
 
-	// Giới hạn kích thước quét mã để tránh tràn bộ nhớ
+
+    // Giới hạn kích thước quét mã để tránh tràn bộ nhớ
     while (current_copied_offset < code_available_size && relocated_code_buffer.size() < MAX_FUNC_SCAN_SIZE) {
         count = cs_disasm(cs_handle, code_ptr + current_copied_offset, code_available_size - current_copied_offset, original_func_va + current_copied_offset, 1, &insn);
         if (count > 0) {
             std::vector<uint8_t> instr_bytes(insn[0].bytes, insn[0].bytes + insn[0].size);
 
-			// xử lý các lệnh CALL và JMP
+            // xử lý các lệnh CALL và JMP
             if (insn[0].id == X86_INS_CALL || insn[0].id == X86_INS_JMP) {
                 if (insn[0].detail->x86.op_count == 1) {
                     const cs_x86_op* op = &(insn[0].detail->x86.operands[0]);
@@ -235,8 +246,8 @@ bool TrampolineInjector::get_and_relocate_original_function_code(
                     }
                 }
             }
-            
-			// Xử lý các toán hạng RIP-relative trong các lệnh khác
+
+            // Xử lý các toán hạng RIP-relative trong các lệnh khác
             else if (is_64_bit) {
                 for (uint8_t i = 0; i < insn[0].detail->x86.op_count; ++i) {
                     const cs_x86_op* op = &(insn[0].detail->x86.operands[i]);
@@ -262,7 +273,7 @@ bool TrampolineInjector::get_and_relocate_original_function_code(
                 }
             }
 
-			// Thêm mã lệnh đã xử lý vào bộ đệm
+            // Thêm mã lệnh đã xử lý vào bộ đệm
             relocated_code_buffer.insert(relocated_code_buffer.end(), instr_bytes.begin(), instr_bytes.end());
             current_copied_offset += insn[0].size;
 
@@ -272,7 +283,7 @@ bool TrampolineInjector::get_and_relocate_original_function_code(
                 break;
             }
 
-			cs_free(insn, count); // Giải phóng bộ nhớ của lệnh đã xử lý
+            cs_free(insn, count); // Giải phóng bộ nhớ của lệnh đã xử lý
         }
         else {
             std::cerr << "Warning: Capstone disassembly failed at VA 0x" << std::hex << (original_func_va + current_copied_offset)
@@ -281,21 +292,21 @@ bool TrampolineInjector::get_and_relocate_original_function_code(
         }
     }
 
-	cs_close(&cs_handle); // Đóng Capstone engine
+    cs_close(&cs_handle); // Đóng Capstone engine
 
-	// Kiểm tra xem có mã nào được di chuyển không
+    // Kiểm tra xem có mã nào được di chuyển không
     if (relocated_code_buffer.empty()) {
         std::cerr << "Error: Could not disassemble any instruction from original function." << std::endl;
         return false;
     }
 
-	// In ra mã đã di chuyển để debug
+    // In ra mã đã di chuyển để debug
     if (!ret_found) {
         std::cout << "Warning: No RET instruction found within scan limit. Appending RET (0xC3)." << std::endl;
         relocated_code_buffer.push_back(0xC3);
     }
 
-	// In ra mã đã di chuyển
+    // In ra mã đã di chuyển
     determined_original_function_size = current_copied_offset;
     return true;
 }
@@ -342,18 +353,18 @@ std::string TrampolineInjector::get_random_junk_instruction() {
             "sub r10, 0x35; add r10, 0x35",
             "sub r11, 0x45; add r11, 0x45",
 
-			// các chuỗi toán học phức tạp hơn
+            // các chuỗi toán học phức tạp hơn
             "add r8, 0x100; sub r8, 0x80; sub r8, 0x80",
             "sub r9, 0x200; add r9, 0x100; add r9, 0x100",
             "add r10, 0x50; add r10, 0x50; sub r10, 0xA0",
 
-			// các mẫu XOR đơn giản
+            // các mẫu XOR đơn giản
             "xor r8, 0x1234; xor r8, 0x1234",
             "xor r9, 0x5678; xor r9, 0x5678",
             "xor r10, 0x9ABC; xor r10, 0x9ABC",
             "xor r11, 0xDEF0; xor r11, 0xDEF0",
 
-			// các hoạt động stack đơn giản
+            // các hoạt động stack đơn giản
             "shl r8, 2; shr r8, 2",
             "shl r9, 3; shr r9, 3",
             "shr r10, 1; shl r10, 1",
@@ -362,7 +373,7 @@ std::string TrampolineInjector::get_random_junk_instruction() {
             // Cross-register stack
             "push r8; push r9; pop r9; pop r8",
 
-			// các phép toán bit không thay đổi giá trị
+            // các phép toán bit không thay đổi giá trị
             "or r8, 0",
             "and r8, -1",
             "or r9, 0",
@@ -370,7 +381,7 @@ std::string TrampolineInjector::get_random_junk_instruction() {
             "or r10, 0",
             "and r10, -1",
 
-			// các phép rol/ror không thay đổi giá trị
+            // các phép rol/ror không thay đổi giá trị
             "rol r8, 1; ror r8, 1",
             "rol r9, 2; ror r9, 2",
             "ror r10, 3; rol r10, 3",
@@ -382,7 +393,7 @@ std::string TrampolineInjector::get_random_junk_instruction() {
             "dec r10; inc r10",
             "dec r11; inc r11",
 
-			// Nhiều thao tác không thay đổi giá trị
+            // Nhiều thao tác không thay đổi giá trị
             "mov r8, r9; mov r9, r8; mov r8, r9; mov r9, r8",
             "add r8, 1; add r8, 1; sub r8, 2",
             "sub r9, 5; add r9, 3; add r9, 2",
@@ -759,6 +770,7 @@ bool TrampolineInjector::create_trampoline(uint64_t original_func_va, uint64_t n
         return false;
     }
 }
+
 // Inject một hàm: relocate mã gốc, tạo section mới, chèn trampoline
 bool TrampolineInjector::inject_function_trampoline(uint32_t function_rva) {
     uint64_t original_function_va = image_base + function_rva;
@@ -773,7 +785,7 @@ bool TrampolineInjector::inject_function_trampoline(uint32_t function_rva) {
     std::vector<uint8_t> relocated_code_bytes;
     size_t original_function_processed_size = 0;
 
-	// đầu tiên lấy mã relocated trước khi build
+    // đầu tiên lấy mã relocated trước khi build
     if (!get_and_relocate_original_function_code(original_function_va, 0, relocated_code_bytes, original_function_processed_size)) {
         std::cerr << "Error processing original function code." << std::endl;
         return false;
@@ -814,7 +826,7 @@ bool TrampolineInjector::inject_function_trampoline(uint32_t function_rva) {
     new_section_ptr->virtual_size(static_cast<uint32_t>(final_virtual_size));
     new_section_ptr->content(relocated_code_bytes);
 
-	// xây d dựng lại layout của binary
+    // xây d dựng lại layout của binary
     LIEF::PE::Builder temp_builder(*binary);
     temp_builder.build_imports(false);
     temp_builder.patch_imports(false);
@@ -830,14 +842,14 @@ bool TrampolineInjector::inject_function_trampoline(uint32_t function_rva) {
     uint64_t new_function_base_va = image_base + new_section_ptr->virtual_address();
     std::cout << "New section '.injcod' VA: 0x" << std::hex << new_function_base_va << std::dec << std::endl;
 
-	// di ch chuyển mã gốc sang địa chỉ mới chính xác
+    // di ch chuyển mã gốc sang địa chỉ mới chính xác
     relocated_code_bytes.clear();
     if (!get_and_relocate_original_function_code(original_function_va, new_function_base_va, relocated_code_bytes, original_function_processed_size)) {
         std::cerr << "Error processing original function code with correct VA." << std::endl;
         return false;
     }
 
-	// cập nhật nội dung section mới với mã đã relocate
+    // cập nhật nội dung section mới với mã đã relocate
     new_section_ptr->content(relocated_code_bytes);
     print_bytes("Relocated code (" + std::to_string(relocated_code_bytes.size()) + " bytes): ", relocated_code_bytes);
 
@@ -989,7 +1001,7 @@ bool TrampolineInjector::inject_multiple_function_trampolines(const std::vector<
         // std::cout << "Successfully processed function: " << function_name << std::endl;
     }
 
-   /*std::cout << "\nCompleted processing all " << function_rvas.size() << " function(s)." << std::endl;*/
+    /*std::cout << "\nCompleted processing all " << function_rvas.size() << " function(s)." << std::endl;*/
     return true;
 }
 
@@ -1015,7 +1027,7 @@ bool TrampolineInjector::inject_multiple_function_trampolines_with_limit(
     uint32_t max_injectable = calculate_max_injectable_functions();
     uint32_t planned_injections = static_cast<uint32_t>(function_rvas.size());
 
-	// show phân tích số lượng hàm sẽ chèn
+    // show phân tích số lượng hàm sẽ chèn
     check_section_limit_before_injection(planned_injections);
 
     if (max_injectable == 0) {
@@ -1023,18 +1035,22 @@ bool TrampolineInjector::inject_multiple_function_trampolines_with_limit(
         return false;
     }
 
-	// Giới hạn số lượng hàm sẽ chèn
+    // Giới hạn số lượng hàm sẽ chèn
     uint32_t functions_to_inject = std::min(planned_injections, max_injectable);
 
     /*std::cout << "Proceeding with injection of " << functions_to_inject << " function(s) out of "
         << planned_injections << " requested." << std::endl;*/
 
-	// tạo vector giới hạn
+        // tạo vector giới hạn
     std::vector<uint32_t> limited_rvas(function_rvas.begin(), function_rvas.begin() + functions_to_inject);
     std::vector<std::string> limited_names(function_names.begin(), function_names.begin() + functions_to_inject);
 
-	// thưc hiện chèn các hàm đạt điều kiện
+    // thưc hiện chèn các hàm đạt điều kiện
     bool result = inject_multiple_function_trampolines(limited_rvas, limited_names);
+
+    if (result) {
+        actual_injected_count = functions_to_inject;
+    }
 
     return result;
 }
@@ -1058,6 +1074,412 @@ bool TrampolineInjector::inject_trampoline_to_multiple_functions(
     }
 
     return injector.save_pe(output_pe_path);
+}
+
+// ============ IMPLEMENTATION CỦA JunkCodeManager ============
+
+// Static constants moved from main.cpp
+const std::set<std::string> JunkCodeManager::DANGEROUS_FUNCTION_NAMES = {
+    "mainCRTStartup","atexit",
+    "__scrt_initialize_onexit_tables",
+    "__scrt_dllmain_before_initialize",
+    "_initterm",
+    "_initterm_e",
+    "__C_specific_handler",
+    "_chkstk",
+    "__security_check_cookie",
+    "__GSHandlerCheck",
+    "__isa_available_init",
+    "pre_c_initialization","DebuggerRuntime",
+    "pre_cpp_initialization","operator new","operator delete","failwithmessage",
+};
+
+const std::vector<std::string> JunkCodeManager::DANGEROUS_PREFIXES = {
+    "??_",
+};
+
+// Check if function is blacklisted (moved from main.cpp)
+bool JunkCodeManager::is_function_blacklisted(const std::string& func_name) {
+    // Các hàm có ký tự đặc biệt như "_" hoặc "`" thường là các hàm nội bộ hoặc không mong muốn
+    if (func_name.find_first_of("`_") != std::string::npos) {
+        return true;
+    }
+    // bắt đầu bằng dấu gạch dưới
+    if (func_name.rfind('_', 0) == 0) {
+        return true;
+    }
+
+    // Kiểm tra xem tên hàm có nằm trong danh sách các hàm nguy hiểm hay không
+    if (DANGEROUS_FUNCTION_NAMES.count(func_name)) {
+        return true;
+    }
+
+    // Kiểm tra xem tên hàm có bắt đầu bằng các tiền tố nguy hiểm hay không
+    for (const auto& prefix : DANGEROUS_PREFIXES) {
+        if (func_name.rfind(prefix, 0) == 0) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+// Sort functions by size descending (moved from main.cpp)
+void JunkCodeManager::sort_functions_by_size_desc(std::vector<uint32_t>& function_rvas,
+    std::vector<std::string>& function_names,
+    const std::vector<FuncToRVA::FunctionInfo>& all_functions) {
+
+    // Tạo một vector để lưu trữ cặp chỉ mục và kích thước
+    std::vector<std::pair<size_t, uint32_t>> index_size_pairs;
+
+    for (size_t i = 0; i < function_rvas.size(); ++i) {
+        uint32_t rva = function_rvas[i];
+
+        // Tìm kích thước của hàm dựa trên RVA
+        auto it = std::find_if(all_functions.begin(), all_functions.end(),
+            [rva](const FuncToRVA::FunctionInfo& func) { return func.rva == rva; });
+
+        if (it != all_functions.end()) {
+            index_size_pairs.push_back({ i, it->size });
+        }
+        else {
+            index_size_pairs.push_back({ i, 0 }); // Nếu không tìm thấy, đặt kích thước là 0
+        }
+    }
+
+    // sắp xếp các cặp chỉ mục và kích thước theo kích thước giảm dần
+    std::sort(index_size_pairs.begin(), index_size_pairs.end(),
+        [](const std::pair<size_t, uint32_t>& a, const std::pair<size_t, uint32_t>& b) {
+            return a.second > b.second; // Giảm dần theo kích thước
+        });
+
+    // sắp xếp lại các mảng dựa trên chỉ mục đã sắp xếp
+    std::vector<uint32_t> sorted_rvas;
+    std::vector<std::string> sorted_names;
+
+    for (const auto& pair : index_size_pairs) {
+        sorted_rvas.push_back(function_rvas[pair.first]);
+        sorted_names.push_back(function_names[pair.first]);
+    }
+
+    function_rvas = std::move(sorted_rvas);
+    function_names = std::move(sorted_names);
+}
+
+// Get multiple RVAs interactively (moved from main.cpp)
+bool JunkCodeManager::get_multiple_rvas_interactive(const std::string& input_pe_path,
+    std::vector<uint32_t>& rvas_out,
+    std::vector<std::string>& names_out) {
+
+    std::cout << "Attempting to select multiple function RVAs from: " << input_pe_path << std::endl;
+    if (FuncToRVA::get_multiple_rvas_by_interactive_selection(input_pe_path, rvas_out, names_out)) {
+        std::cout << "Selected " << rvas_out.size() << " function(s):" << std::endl;
+        for (size_t i = 0; i < rvas_out.size(); ++i) {
+            std::cout << "  " << (i + 1) << ". " << names_out[i]
+                << " (RVA: 0x" << std::hex << rvas_out[i] << std::dec << ")" << std::endl;
+        }
+        return true;
+    }
+    else {
+        std::cout << "Please enter RVAs manually or ensure a valid PDB is accessible.\n" << std::endl;
+
+        // Nhập thủ công cho nhiều RVAs
+        std::string input_str;
+        std::cout << "Type RVAs of functions (comma-separated, e.g., 1A2B0,1C3D0): ";
+        std::getline(std::cin, input_str);
+
+        if (input_str.empty()) {
+            std::cerr << "Error: No RVAs provided." << std::endl;
+            return false;
+        }
+
+        // Lấy các thứ tự tương ứng với các RVA
+        std::stringstream ss(input_str);
+        std::string token;
+        rvas_out.clear();
+        names_out.clear();
+
+        while (std::getline(ss, token, ',')) {
+            // tách khoảng trắng
+            token.erase(0, token.find_first_not_of(" \t"));
+            token.erase(token.find_last_not_of(" \t") + 1);
+
+            try {
+                std::string temp_token = token;
+
+                if (temp_token.rfind("0x", 0) == 0 || temp_token.rfind("0X", 0) == 0) {
+                    temp_token = temp_token.substr(2);
+                }
+
+                if (temp_token.empty()) {
+                    std::cerr << "Error: Invalid RVA format '" << token << "'." << std::endl;
+                    continue;
+                }
+
+                uint32_t rva = static_cast<uint32_t>(std::stoul(temp_token, nullptr, 16));
+                rvas_out.push_back(rva);
+                names_out.push_back("Manual_RVA_0x" + temp_token);
+
+                std::cout << "Added RVA: 0x" << std::hex << rva << std::dec << std::endl;
+            }
+            catch (const std::exception& e) {
+                std::cerr << "Error parsing RVA '" << token << "': " << e.what() << std::endl;
+            }
+        }
+
+        if (rvas_out.empty()) {
+            std::cerr << "Error: No valid RVAs were parsed." << std::endl;
+            return false;
+        }
+
+        std::cout << "Using " << rvas_out.size() << " manually provided RVA(s)." << std::endl;
+        return true;
+    }
+}
+
+// Filter functions by size (moved from main.cpp)
+bool JunkCodeManager::filter_functions_by_size(const std::string& input_pe_path,
+    const std::vector<uint32_t>& input_rvas,
+    const std::vector<std::string>& input_names,
+    std::vector<uint32_t>& filtered_rvas,
+    std::vector<std::string>& filtered_names,
+    uint32_t min_size) {
+
+    filtered_rvas.clear();
+    filtered_names.clear();
+
+    try {
+        // Khởi tạo RVAResolver để lấy thông tin size
+        FuncToRVA::RVAResolver resolver(input_pe_path);
+        if (!resolver.initialize()) {
+            std::cerr << "Error: Could not initialize PDB resolver for size filtering.\n";
+            return false;
+        }
+
+        const auto& all_functions = resolver.get_functions_info();
+        std::vector<std::string> excluded_functions;
+        std::vector<uint32_t> excluded_sizes;
+
+        for (size_t i = 0; i < input_rvas.size(); ++i) {
+            uint32_t rva = input_rvas[i];
+            const std::string& name = input_names[i];
+
+            // Tìm thông tin size từ all_functions
+            auto it = std::find_if(all_functions.begin(), all_functions.end(),
+                [rva](const FuncToRVA::FunctionInfo& func) { return func.rva == rva; });
+
+            if (it != all_functions.end()) {
+                if (it->size >= min_size) {
+                    filtered_rvas.push_back(rva);
+                    filtered_names.push_back(name);
+                }
+                else {
+                    excluded_functions.push_back(name);
+                    excluded_sizes.push_back(it->size);
+                }
+            }
+            else {
+                // Không tìm thấy trong PDB, có thể là manual RVA
+                std::cout << "Warning: Could not find size info for " << name << " (RVA: 0x"
+                    << std::hex << rva << std::dec << "). Adding to filtered list." << std::endl;
+                filtered_rvas.push_back(rva);
+                filtered_names.push_back(name);
+            }
+        }
+
+        // Hiển thị kết quả lọc
+        if (!excluded_functions.empty()) {
+            std::cout << "\n=== Size Filtering Results ===" << std::endl;
+            std::cout << "Excluded " << excluded_functions.size() << " function(s) with size < " << min_size << " bytes:" << std::endl;
+            for (size_t i = 0; i < excluded_functions.size(); ++i) {
+                std::cout << "  - " << excluded_functions[i] << " (size: " << excluded_sizes[i] << " bytes)" << std::endl;
+            }
+            std::cout << std::endl;
+        }
+
+        if (filtered_rvas.empty()) {
+            std::cout << "Warning: No functions remain after size filtering (min size: " << min_size << " bytes)." << std::endl;
+            return false;
+        }
+
+        std::cout << "After filtering: " << filtered_rvas.size() << " function(s) with size >= " << min_size << " bytes" << std::endl;
+        return true;
+
+    }
+    catch (const std::exception& e) {
+        std::cerr << "Error during size filtering: " << e.what() << std::endl;
+        return false;
+    }
+}
+
+// Auto injection mode implementation
+int JunkCodeManager::run_auto_injection_mode(const std::string& input_pe_path,
+    const std::string& output_pe_path,
+    bool is_64_bit) {
+    std::cout << "Running auto-injection mode..." << std::endl;
+
+    try {
+        FuncToRVA::RVAResolver resolver(input_pe_path);
+        if (!resolver.initialize()) {
+            std::cerr << "Error: Could not initialize PDB resolver.\n";
+            return 1;
+        }
+
+        const auto& all_functions = resolver.get_functions_info();
+        std::vector<uint32_t> function_rvas;
+        std::vector<std::string> function_names;
+
+        // Lọc các hàm có kích thước lớn hơn 5 bytes và không bị blacklist
+        std::vector<std::pair<uint32_t, std::string>> size_sorted_functions;
+        int skipped_count = 0;
+
+        for (const auto& func_info : all_functions) {
+            if (is_function_blacklisted(func_info.name)) {
+                skipped_count++;
+                continue;
+            }
+
+            if (func_info.size > 5) { // Chỉ lấy các hàm có kích thước lớn hơn 5 bytes
+                size_sorted_functions.push_back({ func_info.size, func_info.name });
+            }
+        }
+
+        // Sắp xếp các hàm theo kích thước giảm dần
+        std::sort(size_sorted_functions.begin(), size_sorted_functions.end(),
+            [](const std::pair<uint32_t, std::string>& a, const std::pair<uint32_t, std::string>& b) {
+                return a.first > b.first; // Giảm dần theo kích thước
+            });
+
+        // Phân tách các hàm đã sắp xếp thành danh sách các RVA và tên hàm
+        for (const auto& size_name_pair : size_sorted_functions) {
+            const std::string& func_name = size_name_pair.second;
+
+            // Tìm kiếm thông tin hàm để lấy RVA    
+            auto it = std::find_if(all_functions.begin(), all_functions.end(),
+                [&func_name](const FuncToRVA::FunctionInfo& func) {
+                    return func.name == func_name;
+                });
+
+            if (it != all_functions.end()) {
+                function_rvas.push_back(it->rva);
+                function_names.push_back(it->name);
+            }
+        }
+
+        if (function_rvas.empty()) {
+            std::cerr << "No functions > 5 bytes found.\n";
+            return 1;
+        }
+
+        // Chèn thông minh với tự động giới hạn các hàm
+        uint32_t actual_injected_count = 0;
+        bool result = TrampolineInjector::inject_trampoline_to_multiple_functions_smart(
+            input_pe_path, output_pe_path, function_rvas, function_names,
+            actual_injected_count, is_64_bit);
+
+        if (!result) {
+            std::cerr << "Smart Auto-injection failed!\n";
+            return 1;
+        }
+
+        std::cout << "\nSuccessfully injected trampolines into " << actual_injected_count << " function(s)" << std::endl;
+        return 0;
+
+    }
+    catch (const std::exception& e) {
+        std::cerr << "Error in auto injection mode: " << e.what() << std::endl;
+        return 1;
+    }
+}
+
+// Manual injection mode implementation  
+int JunkCodeManager::run_manual_injection_mode(const std::string& input_pe_path,
+    const std::string& output_pe_path,
+    bool is_64_bit) {
+    std::cout << "Running manual injection mode..." << std::endl;
+
+    try {
+        std::vector<uint32_t> function_rvas;
+        std::vector<std::string> function_names;
+
+        if (!get_multiple_rvas_interactive(input_pe_path, function_rvas, function_names)) {
+            return 1;
+        }
+
+        // Lọc size cho manual mode
+        std::vector<uint32_t> filtered_rvas;
+        std::vector<std::string> filtered_names;
+
+        if (!filter_functions_by_size(input_pe_path, function_rvas, function_names,
+            filtered_rvas, filtered_names, 5)) {
+            std::cerr << "Error: Size filtering failed or no functions remain after filtering.\n";
+            return 1;
+        }
+
+        // Sử dụng filtered list thay vì original list
+        function_rvas = std::move(filtered_rvas);
+        function_names = std::move(filtered_names);
+
+        if (function_rvas.empty()) {
+            std::cerr << "Error: No functions remain after size filtering.\n";
+            return 1;
+        }
+
+        std::cout << "Proceeding with " << function_rvas.size() << " function(s) that meet size requirements." << std::endl;
+
+        // Kiểm tra giới hạn section
+        TrampolineInjector temp_injector;
+        if (!temp_injector.load_pe(input_pe_path)) {
+            std::cerr << "Error: Could not load PE for section analysis.\n";
+            return 1;
+        }
+
+        if (!temp_injector.check_section_limit_before_injection(static_cast<uint32_t>(function_rvas.size()))) {
+            std::cout << "\nWarning: Selected functions exceed safe section limit." << std::endl;
+            std::cout << "Would you like to proceed with automatic limiting? (y/n): ";
+            std::string proceed_choice;
+            std::getline(std::cin, proceed_choice);
+
+            if (proceed_choice != "y" && proceed_choice != "Y") {
+                std::cout << "Operation cancelled by user." << std::endl;
+                return 1;
+            }
+
+            // Chèn tự động với giới hạn
+            uint32_t actual_injected_count = 0;
+            bool result = TrampolineInjector::inject_trampoline_to_multiple_functions_smart(
+                input_pe_path, output_pe_path, function_rvas, function_names,
+                actual_injected_count, is_64_bit);
+
+            if (!result) {
+                std::cerr << "Smart Manual Injection failed!\n";
+                return 1;
+            }
+
+            std::cout << "\nSuccessfully injected trampolines into " << actual_injected_count
+                << " function(s) out of " << function_rvas.size() << " selected." << std::endl;
+        }
+        else {
+            // Chèn thường - giới hạn chấp nhận được
+            bool result = TrampolineInjector::inject_trampoline_to_multiple_functions(
+                input_pe_path, output_pe_path, function_rvas, function_names, is_64_bit);
+
+            if (!result) {
+                std::cerr << "Manual Functions Injection failed!\n";
+                return 1;
+            }
+
+            std::cout << "\nSuccessfully injected trampolines into all " << function_rvas.size()
+                << " selected function(s)." << std::endl;
+        }
+
+        return 0;
+
+    }
+    catch (const std::exception& e) {
+        std::cerr << "Error in manual injection mode: " << e.what() << std::endl;
+        return 1;
+    }
 }
 
 // Hàm static: inject nhiều hàm có kiểm tra giới hạn section
