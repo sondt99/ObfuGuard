@@ -1,44 +1,44 @@
-﻿  cfflattener.cpp
-E:\Graduation-Thesis-HUST\ObfuGuard\obfuscatecff\obfuscatecff.h(73,9): warning C4240: nonstandard extension used: access to 'obfuscatecff::instruction_t' now defined to be 'public', previously it was defined to be 'private'
-  (compiling source file 'cfflattener/cfflattener.cpp')
-      E:\Graduation-Thesis-HUST\ObfuGuard\obfuscatecff\obfuscatecff.h(15,9):
+﻿  cfflattening.cpp
+E:\Graduation-Thesis-HUST\ObfuGuard\obfuscatecff\obfuscatecff.h(74,12): warning C4240: nonstandard extension used: access to 'obfuscatecff::instruction_t' now defined to be 'public', previously it was defined to be 'private'
+  (compiling source file 'cfflattening/cfflattening.cpp')
+      E:\Graduation-Thesis-HUST\ObfuGuard\obfuscatecff\obfuscatecff.h(14,12):
       see declaration of 'obfuscatecff::instruction_t'
   
-E:\Graduation-Thesis-HUST\ObfuGuard\obfuscatecff\obfuscatecff.h(102,9): warning C4240: nonstandard extension used: access to 'obfuscatecff::function_t' now defined to be 'public', previously it was defined to be 'private'
-  (compiling source file 'cfflattener/cfflattener.cpp')
-      E:\Graduation-Thesis-HUST\ObfuGuard\obfuscatecff\obfuscatecff.h(16,9):
+E:\Graduation-Thesis-HUST\ObfuGuard\obfuscatecff\obfuscatecff.h(114,12): warning C4240: nonstandard extension used: access to 'obfuscatecff::function_t' now defined to be 'public', previously it was defined to be 'private'
+  (compiling source file 'cfflattening/cfflattening.cpp')
+      E:\Graduation-Thesis-HUST\ObfuGuard\obfuscatecff\obfuscatecff.h(15,9):
       see declaration of 'obfuscatecff::function_t'
   
   func2rva.cpp
   main.cpp
-E:\Graduation-Thesis-HUST\ObfuGuard\obfuscatecff\obfuscatecff.h(73,9): warning C4240: nonstandard extension used: access to 'obfuscatecff::instruction_t' now defined to be 'public', previously it was defined to be 'private'
+E:\Graduation-Thesis-HUST\ObfuGuard\obfuscatecff\obfuscatecff.h(74,12): warning C4240: nonstandard extension used: access to 'obfuscatecff::instruction_t' now defined to be 'public', previously it was defined to be 'private'
   (compiling source file 'main.cpp')
-      E:\Graduation-Thesis-HUST\ObfuGuard\obfuscatecff\obfuscatecff.h(15,9):
+      E:\Graduation-Thesis-HUST\ObfuGuard\obfuscatecff\obfuscatecff.h(14,12):
       see declaration of 'obfuscatecff::instruction_t'
   
-E:\Graduation-Thesis-HUST\ObfuGuard\obfuscatecff\obfuscatecff.h(102,9): warning C4240: nonstandard extension used: access to 'obfuscatecff::function_t' now defined to be 'public', previously it was defined to be 'private'
+E:\Graduation-Thesis-HUST\ObfuGuard\obfuscatecff\obfuscatecff.h(114,12): warning C4240: nonstandard extension used: access to 'obfuscatecff::function_t' now defined to be 'public', previously it was defined to be 'private'
   (compiling source file 'main.cpp')
-      E:\Graduation-Thesis-HUST\ObfuGuard\obfuscatecff\obfuscatecff.h(16,9):
+      E:\Graduation-Thesis-HUST\ObfuGuard\obfuscatecff\obfuscatecff.h(15,9):
       see declaration of 'obfuscatecff::function_t'
   
   obfuscatecff.cpp
-E:\Graduation-Thesis-HUST\ObfuGuard\obfuscatecff\obfuscatecff.h(73,9): warning C4240: nonstandard extension used: access to 'obfuscatecff::instruction_t' now defined to be 'public', previously it was defined to be 'private'
+E:\Graduation-Thesis-HUST\ObfuGuard\obfuscatecff\obfuscatecff.h(74,12): warning C4240: nonstandard extension used: access to 'obfuscatecff::instruction_t' now defined to be 'public', previously it was defined to be 'private'
   (compiling source file 'obfuscatecff/obfuscatecff.cpp')
-      E:\Graduation-Thesis-HUST\ObfuGuard\obfuscatecff\obfuscatecff.h(15,9):
+      E:\Graduation-Thesis-HUST\ObfuGuard\obfuscatecff\obfuscatecff.h(14,12):
       see declaration of 'obfuscatecff::instruction_t'
   
-E:\Graduation-Thesis-HUST\ObfuGuard\obfuscatecff\obfuscatecff.h(102,9): warning C4240: nonstandard extension used: access to 'obfuscatecff::function_t' now defined to be 'public', previously it was defined to be 'private'
+E:\Graduation-Thesis-HUST\ObfuGuard\obfuscatecff\obfuscatecff.h(114,12): warning C4240: nonstandard extension used: access to 'obfuscatecff::function_t' now defined to be 'public', previously it was defined to be 'private'
   (compiling source file 'obfuscatecff/obfuscatecff.cpp')
-      E:\Graduation-Thesis-HUST\ObfuGuard\obfuscatecff\obfuscatecff.h(16,9):
+      E:\Graduation-Thesis-HUST\ObfuGuard\obfuscatecff\obfuscatecff.h(15,9):
       see declaration of 'obfuscatecff::function_t'
   
-E:\Graduation-Thesis-HUST\ObfuGuard\obfuscatecff\obfuscatecff.cpp(77,75): warning C4244: '=': conversion from 'uint64_t' to 'int', possible loss of data
-E:\Graduation-Thesis-HUST\ObfuGuard\obfuscatecff\obfuscatecff.cpp(312,25): warning C4244: 'initializing': conversion from 'uint64_t' to 'int', possible loss of data
-E:\Graduation-Thesis-HUST\ObfuGuard\obfuscatecff\obfuscatecff.cpp(352,25): warning C4244: 'initializing': conversion from 'uint64_t' to 'int', possible loss of data
-E:\Graduation-Thesis-HUST\ObfuGuard\obfuscatecff\obfuscatecff.cpp(361,25): warning C4244: 'initializing': conversion from 'uint64_t' to 'int', possible loss of data
-E:\Graduation-Thesis-HUST\ObfuGuard\obfuscatecff\obfuscatecff.cpp(518,17): warning C4244: 'initializing': conversion from 'uint64_t' to 'uint32_t', possible loss of data
-E:\Graduation-Thesis-HUST\ObfuGuard\obfuscatecff\obfuscatecff.cpp(523,22): warning C4018: '<': signed/unsigned mismatch
-E:\Graduation-Thesis-HUST\ObfuGuard\obfuscatecff\obfuscatecff.cpp(538,169): warning C4244: '=': conversion from 'ULONGLONG' to 'uint32_t', possible loss of data
+E:\Graduation-Thesis-HUST\ObfuGuard\obfuscatecff\obfuscatecff.cpp(79,75): warning C4244: '=': conversion from 'uint64_t' to 'int', possible loss of data
+E:\Graduation-Thesis-HUST\ObfuGuard\obfuscatecff\obfuscatecff.cpp(314,25): warning C4244: 'initializing': conversion from 'uint64_t' to 'int', possible loss of data
+E:\Graduation-Thesis-HUST\ObfuGuard\obfuscatecff\obfuscatecff.cpp(354,25): warning C4244: 'initializing': conversion from 'uint64_t' to 'int', possible loss of data
+E:\Graduation-Thesis-HUST\ObfuGuard\obfuscatecff\obfuscatecff.cpp(363,25): warning C4244: 'initializing': conversion from 'uint64_t' to 'int', possible loss of data
+E:\Graduation-Thesis-HUST\ObfuGuard\obfuscatecff\obfuscatecff.cpp(520,17): warning C4244: 'initializing': conversion from 'uint64_t' to 'uint32_t', possible loss of data
+E:\Graduation-Thesis-HUST\ObfuGuard\obfuscatecff\obfuscatecff.cpp(525,22): warning C4018: '<': signed/unsigned mismatch
+E:\Graduation-Thesis-HUST\ObfuGuard\obfuscatecff\obfuscatecff.cpp(540,169): warning C4244: '=': conversion from 'ULONGLONG' to 'uint32_t', possible loss of data
   pdbparser.cpp
   pe.cpp
   junkcode.cpp
@@ -70,7 +70,7 @@ E:\Graduation-Thesis-HUST\ObfuGuard\junkcode\junkcode.cpp(222,51): warning C4244
 E:\Graduation-Thesis-HUST\ObfuGuard\junkcode\junkcode.cpp(245,47): warning C4244: 'initializing': conversion from 'const int64_t' to 'int32_t', possible loss of data
   Generating code
   Previous IPDB not found, fall back to full compilation.
-  All 3020 functions were compiled because no usable IPDB/IOBJ from previous compilation was found.
+  All 3047 functions were compiled because no usable IPDB/IOBJ from previous compilation was found.
   Finished generating code
   ObfuGuard.vcxproj -> E:\Graduation-Thesis-HUST\x64\Release\ObfuGuard-con.exe
   'pwsh.exe' is not recognized as an internal or external command,
