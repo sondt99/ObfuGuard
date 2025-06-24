@@ -1,7 +1,5 @@
-﻿// Đặt include theo thứ tự này
-#include "junkcode.h"
+﻿#include "junkcode.h"
 
-// System includes
 #include <iostream>
 #include <fstream>
 #include <vector>
@@ -15,12 +13,10 @@
 #include <set>
 #define NOMINMAX
 
-// Third-party includes
 #include <LIEF/LIEF.hpp>
 #include <capstone/capstone.h>
 #include <keystone/keystone.h>
 
-// Local includes
 #include "../func2rva/func2rva.h"
 
 // Hàm khởi tạo/Hàm huỷ
@@ -1078,7 +1074,7 @@ bool TrampolineInjector::inject_trampoline_to_multiple_functions(
 
 // ============ IMPLEMENTATION CỦA JunkCodeManager ============
 
-// Static constants moved from main.cpp
+// các hàm nguy hiểm và tiền tố nguy hiểm
 const std::set<std::string> JunkCodeManager::DANGEROUS_FUNCTION_NAMES = {
     "mainCRTStartup","atexit",
     "__scrt_initialize_onexit_tables",
@@ -1098,7 +1094,7 @@ const std::vector<std::string> JunkCodeManager::DANGEROUS_PREFIXES = {
     "??_",
 };
 
-// Check if function is blacklisted (moved from main.cpp)
+// Kiểm tra xem tên hàm có bị blacklist hay không
 bool JunkCodeManager::is_function_blacklisted(const std::string& func_name) {
     // Các hàm có ký tự đặc biệt như "_" hoặc "`" thường là các hàm nội bộ hoặc không mong muốn
     if (func_name.find_first_of("`_") != std::string::npos) {
@@ -1124,7 +1120,7 @@ bool JunkCodeManager::is_function_blacklisted(const std::string& func_name) {
     return false;
 }
 
-// Sort functions by size descending (moved from main.cpp)
+// sắp xếp các hàm theo kích thước giảm dần
 void JunkCodeManager::sort_functions_by_size_desc(std::vector<uint32_t>& function_rvas,
     std::vector<std::string>& function_names,
     const std::vector<FuncToRVA::FunctionInfo>& all_functions) {
@@ -1166,7 +1162,7 @@ void JunkCodeManager::sort_functions_by_size_desc(std::vector<uint32_t>& functio
     function_names = std::move(sorted_names);
 }
 
-// Get multiple RVAs interactively (moved from main.cpp)
+// Lấy nhiều RVAs tương tác từ người dùng
 bool JunkCodeManager::get_multiple_rvas_interactive(const std::string& input_pe_path,
     std::vector<uint32_t>& rvas_out,
     std::vector<std::string>& names_out) {
@@ -1237,7 +1233,7 @@ bool JunkCodeManager::get_multiple_rvas_interactive(const std::string& input_pe_
     }
 }
 
-// Filter functions by size (moved from main.cpp)
+// Lọc các hàm theo kích thước tối thiểu
 bool JunkCodeManager::filter_functions_by_size(const std::string& input_pe_path,
     const std::vector<uint32_t>& input_rvas,
     const std::vector<std::string>& input_names,
@@ -1312,7 +1308,7 @@ bool JunkCodeManager::filter_functions_by_size(const std::string& input_pe_path,
     }
 }
 
-// Auto injection mode implementation
+// Triển khai chế độ tự động chèn mã
 int JunkCodeManager::run_auto_injection_mode(const std::string& input_pe_path,
     const std::string& output_pe_path,
     bool is_64_bit) {
@@ -1392,7 +1388,7 @@ int JunkCodeManager::run_auto_injection_mode(const std::string& input_pe_path,
     }
 }
 
-// Manual injection mode implementation  
+// Triển khai chế độ chèn thủ công 
 int JunkCodeManager::run_manual_injection_mode(const std::string& input_pe_path,
     const std::string& output_pe_path,
     bool is_64_bit) {

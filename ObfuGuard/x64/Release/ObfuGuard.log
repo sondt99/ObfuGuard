@@ -66,11 +66,11 @@ D:\vcpkg\installed\x64-windows\include\LIEF\PE\ResourcesManager.hpp(72,15): warn
 D:\vcpkg\installed\x64-windows\include\LIEF\PE\LoadConfigurations\LoadConfiguration.hpp(178,12): warning C4244: 'return': conversion from 'const uint64_t' to 'uint32_t', possible loss of data
   (compiling source file 'junkcode/junkcode.cpp')
   
-E:\Graduation-Thesis-HUST\ObfuGuard\junkcode\junkcode.cpp(222,51): warning C4244: 'initializing': conversion from 'const int64_t' to 'int32_t', possible loss of data
-E:\Graduation-Thesis-HUST\ObfuGuard\junkcode\junkcode.cpp(245,47): warning C4244: 'initializing': conversion from 'const int64_t' to 'int32_t', possible loss of data
+E:\Graduation-Thesis-HUST\ObfuGuard\junkcode\junkcode.cpp(228,51): warning C4244: 'initializing': conversion from 'const int64_t' to 'int32_t', possible loss of data
+E:\Graduation-Thesis-HUST\ObfuGuard\junkcode\junkcode.cpp(251,47): warning C4244: 'initializing': conversion from 'const int64_t' to 'int32_t', possible loss of data
   Generating code
   Previous IPDB not found, fall back to full compilation.
-  All 3047 functions were compiled because no usable IPDB/IOBJ from previous compilation was found.
+  All 3063 functions were compiled because no usable IPDB/IOBJ from previous compilation was found.
   Finished generating code
   ObfuGuard.vcxproj -> E:\Graduation-Thesis-HUST\x64\Release\ObfuGuard-con.exe
   'pwsh.exe' is not recognized as an internal or external command,
