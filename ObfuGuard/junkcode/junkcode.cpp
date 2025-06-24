@@ -80,9 +80,8 @@ uint32_t TrampolineInjector::calculate_max_injectable_functions() const {
 bool TrampolineInjector::check_section_limit_before_injection(uint32_t planned_injections) const {
     uint32_t max_injectable = calculate_max_injectable_functions();
 
-    std::cout << "Section Analysis:" << std::endl;
-    std::cout << "  Current sections: " << get_current_section_count() << std::endl;
-    std::cout << "  Injectable functions: " << max_injectable << std::endl;
+    std::cout << "Section Analysis:  Current sections: " << get_current_section_count() << "  Injectable functions: " << max_injectable << std::endl;
+	std::cout << "Junk Code Injection with Trampoline Mode" << std::endl;
 
     if (planned_injections > max_injectable) {
         // std::cout << "  Status: EXCEEDS LIMIT - Will auto-limit to " << max_injectable << " functions" << std::endl;
@@ -888,7 +887,7 @@ bool TrampolineInjector::inject_multiple_function_trampolines(const std::vector<
         return false;
     }
 
-    std::cout << "Processing " << function_rvas.size() << " function(s) for trampoline injection..." << std::endl;
+    /*std::cout << "Processing " << function_rvas.size() << " function(s) for trampoline injection..." << std::endl;*/
 
     for (size_t i = 0; i < function_rvas.size(); ++i) {
         uint32_t function_rva = function_rvas[i];
@@ -990,7 +989,7 @@ bool TrampolineInjector::inject_multiple_function_trampolines(const std::vector<
         // std::cout << "Successfully processed function: " << function_name << std::endl;
     }
 
-    std::cout << "\nCompleted processing all " << function_rvas.size() << " function(s)." << std::endl;
+   /*std::cout << "\nCompleted processing all " << function_rvas.size() << " function(s)." << std::endl;*/
     return true;
 }
 
@@ -1027,8 +1026,8 @@ bool TrampolineInjector::inject_multiple_function_trampolines_with_limit(
 	// Giới hạn số lượng hàm sẽ chèn
     uint32_t functions_to_inject = std::min(planned_injections, max_injectable);
 
-    std::cout << "Proceeding with injection of " << functions_to_inject << " function(s) out of "
-        << planned_injections << " requested." << std::endl;
+    /*std::cout << "Proceeding with injection of " << functions_to_inject << " function(s) out of "
+        << planned_injections << " requested." << std::endl;*/
 
 	// tạo vector giới hạn
     std::vector<uint32_t> limited_rvas(function_rvas.begin(), function_rvas.begin() + functions_to_inject);

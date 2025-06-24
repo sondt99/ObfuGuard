@@ -480,16 +480,16 @@ int mode_trampoline_junkcode() {
                     skipped_count++;
                     continue; // Bỏ qua và đi đến hàm tiếp theo
                 }
-                std::cout << "PASS " << func_info.name << std::endl;
+                //std::cout << "PASS " << func_info.name << std::endl;
 
                 if (func_info.size > 5) { // Chỉ lấy các hàm có kích thước lớn hơn 5 bytes
                     size_sorted_functions.push_back({ func_info.size, func_info.name });
                 }
             }
 
-            if (skipped_count > 0) {
+            /*if (skipped_count > 0) {
                 std::cout << "Info: Skipped " << skipped_count << " blacklisted/dangerous functions." << std::endl;
-            }
+            }*/
 
             // Sắp xếp các hàm theo kích thước giảm dần
             std::sort(size_sorted_functions.begin(), size_sorted_functions.end(),
@@ -514,7 +514,7 @@ int mode_trampoline_junkcode() {
             }
 
             if (function_rvas.empty()) {
-                std::cerr << "No functions > 15 bytes found.\n";
+                std::cerr << "No functions > 5 bytes found.\n";
                 return 1;
             }
 
@@ -537,7 +537,7 @@ int mode_trampoline_junkcode() {
                 return 1;
             }
 
-            std::cout << "\nSuccessfully injected trampolines into " << actual_injected_count << " function(s)" << std::endl;
+            std::cout << "\nSuccessfully injected trampolines into " << function_rvas.size() << " function(s)" << std::endl;
         }
         else if (mode_choice == "2") {
             std::vector<uint32_t> function_rvas;
