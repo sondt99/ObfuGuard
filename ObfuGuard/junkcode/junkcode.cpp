@@ -624,7 +624,7 @@ bool TrampolineInjector::create_trampoline(uint64_t original_func_va, uint64_t n
         // patch mã rác (junk) trước lệnh JMP với giới hạn iteration
         size_t remaining_before = junk_before_size;
         size_t junk_iteration_count = 0;
-        const size_t MAX_JUNK_ITERATIONS = 100; // Giới hạn iteration để tránh vô tận
+        const size_t MAX_JUNK_ITERATIONS = 500; // Giới hạn iteration để tránh vô tận
 
         /*std::cout << "Phase 1: Adding " << remaining_before << " bytes of junk before JMP..." << std::endl;*/
 
