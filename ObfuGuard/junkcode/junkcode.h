@@ -126,9 +126,18 @@ private:
 
     static bool is_function_blacklisted(const std::string& func_name);
 
+    // ========== THÊM MỚI: Binary size checking methods ==========
+    static bool is_binary_large(const std::string& binary_path);
+    static bool is_large_binary_function_dangerous(const std::string& func_name, const std::string& binary_path);
+    static bool is_function_blacklisted_by_binary_size(const std::string& func_name, const std::string& binary_path);
+
     // Constants moved from main.cpp
     static const std::set<std::string> DANGEROUS_FUNCTION_NAMES;
     static const std::vector<std::string> DANGEROUS_PREFIXES;
+
+    // ========== THAY ĐỔI: Constants cho binary size checking ==========
+    static const uint32_t LARGE_BINARY_SIZE_THRESHOLD; // Thay đổi từ LARGE_FUNCTION_SIZE_THRESHOLD
+    static const std::set<std::string> DANGEROUS_FUNCTION_NAMES_BIG_BINARY; // Thay đổi từ DANGEROUS_FUNCTION_NAMES_BIG_SIZE
 };
 
 #endif // JUNKCODE_H

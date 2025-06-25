@@ -12,6 +12,7 @@
 #include <sstream>
 #include <set>
 #define NOMINMAX
+#include <filesystem>
 
 #include <LIEF/LIEF.hpp>
 #include <capstone/capstone.h>
@@ -1073,6 +1074,7 @@ bool TrampolineInjector::inject_trampoline_to_multiple_functions(
 }
 
 // ============ IMPLEMENTATION CỦA JunkCodeManager ============
+const uint32_t JunkCodeManager::LARGE_BINARY_SIZE_THRESHOLD = 350 * 1024;
 
 // các hàm nguy hiểm và tiền tố nguy hiểm
 const std::set<std::string> JunkCodeManager::DANGEROUS_FUNCTION_NAMES = {
@@ -1088,16 +1090,63 @@ const std::set<std::string> JunkCodeManager::DANGEROUS_FUNCTION_NAMES = {
     "__isa_available_init",
     "pre_c_initialization","DebuggerRuntime",
     "pre_cpp_initialization","operator new","operator delete","failwithmessage",
-	"exit", "fget", "fwrite", "memcpy", "memmove", "memset", "malloc", "free",
-	"fread", "fclose", "fopen", "fprintf", "printf", "sprintf", "snprintf",
-	"strcpy", "strncpy", "strcat", "strncat", "strlen", "strcmp", "strncmp",
-	"fgetc", "fgets", "fputc", "fputs", "vfprintf", "vprintf", "vsprintf",
+    "exit", "fget", "fwrite", "memcpy", "memmove", "memset", "malloc", "free",
+    "fread", "fclose", "fopen", "fprintf", "printf", "sprintf", "snprintf",
+    "strcpy", "strncpy", "strcat", "strncat", "strlen", "strcmp", "strncmp",
+    "fgetc", "fgets", "fputc", "fputs", "vfprintf", "vprintf", "vsprintf", "fgetpos", "fsetpos", "fegetenv"
+    "srand", "rand", "time", "localtime", "gmtime", "asctime", "ctime",
+    "clock", "ceil", "wcsnlen", "strpbrk", "GetLocaleNameFromLanguage", "strcspn", "memcmp", "qsort",
 };
+
+const std::set<std::string> JunkCodeManager::DANGEROUS_FUNCTION_NAMES_BIG_BINARY = {
+    "DetectPEArchitecture", "main", "pe64::pe64", "pdbparser::pdbparser", "obfuscatecff::obfuscatecff", "obfuscatecff::run", "obfuscatecff::compile", "obfuscatecff::~obfuscatecff", "TrampolineInjector::TrampolineInjector", "TrampolineInjector::~TrampolineInjector", "FuncToRVA::RVAResolver::initialize", "FuncToRVA::RVAResolver::RVAResolver", "FuncToRVA::RVAResolver::~RVAResolver",
+    "terminate", "raise", "raise$fin$0", "std::setw", "ceilf", "InternalCompareStringA", "InternalGetLocaleInfoA",
+    "std::filesystem::exists", "std::filesystem::path::path", "std::filesystem::path::operator/=", "std::filesystem::path::string", "std::filesystem::operator/", "std::vector<unsigned char,std::allocator<unsigned char> >::vector<unsigned char,std::allocator<unsigned char> >", "std::vector<unsigned char,std::allocator<unsigned char> >::resize", "std::vector<unsigned int,std::allocator<unsigned int> >::operator=", "std::exception::exception", "std::exception::what",
+    "strrchr", "srand", "CountryEnumProc","LangCountryEnumProc", "LangCountryEnumProcEx","strnlen", "strrchr", "strtol","strtoul","wcschr","wcscmp","wcsncmp","wcspbrk","isdigit","islower","isupper",
+    "GetLcidFromLanguage","GetLcidFromLangCountry","TranslateName", "TranslateName","TestDefaultLanguage","setSBCS",
+    "setSBUpLow","setvbuf","getSystemCP","ExFilterRethrow","ExFilterRethrowFH4","fallbackMethod","fallbackMethod","FH4::HandlerMap4::HandlerMap4","FH4::HandlerMap4::DecompHandler",
+    "FH4::TryBlockMap4::TryBlockMap4","FH4::TryBlockMap4::setBuffer","FH4::UWMap4::ReadEntry","FH4::UWMap4::getStateFromIterators","FH4::UWMap4::getStartStop","IsInExceptionSpec",
+};
+
+
+
+bool JunkCodeManager::is_large_binary_function_dangerous(const std::string& func_name, const std::string& binary_path) {
+    // Chỉ kiểm tra khi binary lớn hơn threshold
+    if (!is_binary_large(binary_path)) {
+        return false;
+    }
+
+    // Kiểm tra xem tên hàm có nằm trong danh sách các hàm nguy hiểm với binary lớn
+    return DANGEROUS_FUNCTION_NAMES_BIG_BINARY.count(func_name) > 0;
+}
 
 const std::vector<std::string> JunkCodeManager::DANGEROUS_PREFIXES = {
     "??_",
 };
 
+// Kiểm tra kích thước binary và trả về true nếu binary lớn hơn threshold
+bool JunkCodeManager::is_binary_large(const std::string& binary_path) {
+    try {
+        std::filesystem::path file_path(binary_path);
+        if (!std::filesystem::exists(file_path)) {
+            std::cerr << "Error: Binary file does not exist: " << binary_path << std::endl;
+            return false;
+        }
+
+        std::uintmax_t file_size = std::filesystem::file_size(file_path);
+
+        /*std::cout << "Binary size: " << (file_size / 1024) << " KB (Threshold: "
+            << (LARGE_BINARY_SIZE_THRESHOLD / 1024) << " KB)" << std::endl;*/
+
+        return file_size > LARGE_BINARY_SIZE_THRESHOLD;
+    }
+    catch (const std::filesystem::filesystem_error& e) {
+        std::cerr << "Error checking binary size: " << e.what() << std::endl;
+        return false;
+    }
+
+
+}
 // Kiểm tra xem tên hàm có bị blacklist hay không
 bool JunkCodeManager::is_function_blacklisted(const std::string& func_name) {
     // Các hàm có ký tự đặc biệt như "_" hoặc "`" thường là các hàm nội bộ hoặc không mong muốn
@@ -1119,6 +1168,20 @@ bool JunkCodeManager::is_function_blacklisted(const std::string& func_name) {
         if (func_name.rfind(prefix, 0) == 0) {
             return true;
         }
+    }
+
+    return false;
+}
+
+bool JunkCodeManager::is_function_blacklisted_by_binary_size(const std::string& func_name, const std::string& binary_path) {
+    // Kiểm tra blacklist thông thường trước
+    if (is_function_blacklisted(func_name)) {
+        return true;
+    }
+
+    // Kiểm tra blacklist dựa trên kích thước binary
+    if (is_large_binary_function_dangerous(func_name, binary_path)) {
+        return true;
     }
 
     return false;
@@ -1259,6 +1322,7 @@ bool JunkCodeManager::filter_functions_by_size(const std::string& input_pe_path,
         const auto& all_functions = resolver.get_functions_info();
         std::vector<std::string> excluded_functions;
         std::vector<uint32_t> excluded_sizes;
+        std::vector<std::string> excluded_by_binary_size_blacklist;
 
         for (size_t i = 0; i < input_rvas.size(); ++i) {
             uint32_t rva = input_rvas[i];
@@ -1269,6 +1333,16 @@ bool JunkCodeManager::filter_functions_by_size(const std::string& input_pe_path,
                 [rva](const FuncToRVA::FunctionInfo& func) { return func.rva == rva; });
 
             if (it != all_functions.end()) {
+                if (is_function_blacklisted_by_binary_size(it->name, input_pe_path)) {
+                    excluded_functions.push_back(name);
+                    excluded_sizes.push_back(it->size);
+
+                    if (is_large_binary_function_dangerous(it->name, input_pe_path)) {
+                        excluded_by_binary_size_blacklist.push_back(name);
+                    }
+                    continue;
+                }
+
                 if (it->size >= min_size) {
                     filtered_rvas.push_back(rva);
                     filtered_names.push_back(name);
@@ -1290,9 +1364,17 @@ bool JunkCodeManager::filter_functions_by_size(const std::string& input_pe_path,
         // Hiển thị kết quả lọc
         if (!excluded_functions.empty()) {
             std::cout << "\n=== Size Filtering Results ===" << std::endl;
-            std::cout << "Excluded " << excluded_functions.size() << " function(s) with size < " << min_size << " bytes:" << std::endl;
+            std::cout << "Excluded " << excluded_functions.size() << " function(s):" << std::endl;
             for (size_t i = 0; i < excluded_functions.size(); ++i) {
-                std::cout << "  - " << excluded_functions[i] << " (size: " << excluded_sizes[i] << " bytes)" << std::endl;
+                std::string reason = "size < " + std::to_string(min_size) + " bytes";
+
+                // ========== THAY ĐỔI: Hiển thị lý do loại trừ dựa trên binary size ==========
+                if (std::find(excluded_by_binary_size_blacklist.begin(), excluded_by_binary_size_blacklist.end(),
+                    excluded_functions[i]) != excluded_by_binary_size_blacklist.end()) {
+                    reason = "large binary blacklist (binary > " + std::to_string(LARGE_BINARY_SIZE_THRESHOLD / 1024) + "KB)";
+                }
+
+                std::cout << "  - " << excluded_functions[i] << " (" << reason << ")" << std::endl;
             }
             std::cout << std::endl;
         }
@@ -1332,15 +1414,27 @@ int JunkCodeManager::run_auto_injection_mode(const std::string& input_pe_path,
         // Lọc các hàm có kích thước lớn hơn 5 bytes và không bị blacklist
         std::vector<std::pair<uint32_t, std::string>> size_sorted_functions;
         int skipped_count = 0;
+        int skipped_by_binary_size_blacklist = 0;
+
+        // Kiểm tra xem binary có lớn hơn threshold không
+        bool is_large_binary = is_binary_large(input_pe_path);
 
         for (const auto& func_info : all_functions) {
-            if (is_function_blacklisted(func_info.name)) {
+            if (is_function_blacklisted_by_binary_size(func_info.name, input_pe_path)) {
                 skipped_count++;
+
+                // Kiểm tra xem có bị skip do binary size-based blacklist không
+                if (is_large_binary_function_dangerous(func_info.name, input_pe_path)) {
+                    skipped_by_binary_size_blacklist++;
+                    /*std::cout << "Skipped large binary function: " << func_info.name
+                        << " (binary size > " << (LARGE_BINARY_SIZE_THRESHOLD / 1024) << "KB)" << std::endl;*/
+                }
                 continue;
             }
 
             if (func_info.size > 5) { // Chỉ lấy các hàm có kích thước lớn hơn 5 bytes
                 size_sorted_functions.push_back({ func_info.size, func_info.name });
+                // std::cout << func_info.name << std::endl;
             }
         }
 
@@ -1370,6 +1464,9 @@ int JunkCodeManager::run_auto_injection_mode(const std::string& input_pe_path,
             std::cerr << "No functions > 5 bytes found.\n";
             return 1;
         }
+
+        std::cout << "\nSkipped " << skipped_by_binary_size_blacklist
+            << " functions due to large binary blacklist." << std::endl;
 
         // Chèn thông minh với tự động giới hạn các hàm
         uint32_t actual_injected_count = 0;
