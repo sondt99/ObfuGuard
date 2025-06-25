@@ -1088,6 +1088,10 @@ const std::set<std::string> JunkCodeManager::DANGEROUS_FUNCTION_NAMES = {
     "__isa_available_init",
     "pre_c_initialization","DebuggerRuntime",
     "pre_cpp_initialization","operator new","operator delete","failwithmessage",
+	"exit", "fget", "fwrite", "memcpy", "memmove", "memset", "malloc", "free",
+	"fread", "fclose", "fopen", "fprintf", "printf", "sprintf", "snprintf",
+	"strcpy", "strncpy", "strcat", "strncat", "strlen", "strcmp", "strncmp",
+	"fgetc", "fgets", "fputc", "fputs", "vfprintf", "vprintf", "vsprintf",
 };
 
 const std::vector<std::string> JunkCodeManager::DANGEROUS_PREFIXES = {

@@ -3,7 +3,7 @@ import os
 import re
 from pathlib import Path
 
-obfuguard_path = r"E:\Graduation-Thesis-HUST\x64\Debug\ObfuGuard.exe"
+obfuguard_path = r"E:\Graduation-Thesis-HUST\x64\Release\ObfuGuard.exe"
 root_dir = Path(r"E:\Graduation-Thesis-HUST\binary_test")
 
 # Thống kê
