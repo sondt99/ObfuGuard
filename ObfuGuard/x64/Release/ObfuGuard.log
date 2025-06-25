@@ -10,8 +10,33 @@ E:\Graduation-Thesis-HUST\ObfuGuard\obfuscatecff\obfuscatecff.h(114,12): warning
       E:\Graduation-Thesis-HUST\ObfuGuard\obfuscatecff\obfuscatecff.h(15,9):
       see declaration of 'obfuscatecff::function_t'
   
+C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\include\vector(1224,17): warning C4530: C++ exception handler used, but unwind semantics are not enabled. Specify /EHsc
+  (compiling source file 'cfflattening/cfflattening.cpp')
+      C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\include\vector(1224,17):
+      the template instantiation context (the oldest one first) is
+          E:\Graduation-Thesis-HUST\ObfuGuard\cfflattening\cfflattening.cpp(213,35):
+          see reference to function template instantiation 'std::_Vector_iterator<std::_Vector_val<std::_Simple_types<_Ty>>> std::vector<_Ty,std::allocator<_Ty>>::insert<std::_Vector_iterator<std::_Vector_val<std::_Simple_types<_Ty>>>,0>(std::_Vector_const_iterator<std::_Vector_val<std::_Simple_types<_Ty>>>,_Iter,_Iter)' being compiled
+          with
+          [
+              _Ty=obfuscatecff::instruction_t,
+              _Iter=std::_Vector_iterator<std::_Vector_val<std::_Simple_types<obfuscatecff::instruction_t>>>
+          ]
+              E:\Graduation-Thesis-HUST\ObfuGuard\cfflattening\cfflattening.cpp(213,14):
+              see the first reference to 'std::vector<obfuscatecff::instruction_t,std::allocator<obfuscatecff::instruction_t>>::insert' in 'obfuscatecff::apply_control_flow_flattening'
+          C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\include\vector(1282,13):
+          see reference to function template instantiation 'void std::vector<obfuscatecff::instruction_t,std::allocator<obfuscatecff::instruction_t>>::_Insert_counted_range<obfuscatecff::instruction_t*>(std::_Vector_const_iterator<std::_Vector_val<std::_Simple_types<_Ty>>>,_Iter,const unsigned __int64)' being compiled
+          with
+          [
+              _Ty=obfuscatecff::instruction_t,
+              _Iter=obfuscatecff::instruction_t *
+          ]
+  
   func2rva.cpp
+E:\Graduation-Thesis-HUST\ObfuGuard\func2rva\func2rva.cpp(36,9): warning C4530: C++ exception handler used, but unwind semantics are not enabled. Specify /EHsc
   main.cpp
+C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\include\chrono(2359,9): warning C4530: C++ exception handler used, but unwind semantics are not enabled. Specify /EHsc
+  (compiling source file 'main.cpp')
+  
 E:\Graduation-Thesis-HUST\ObfuGuard\obfuscatecff\obfuscatecff.h(74,12): warning C4240: nonstandard extension used: access to 'obfuscatecff::instruction_t' now defined to be 'public', previously it was defined to be 'private'
   (compiling source file 'main.cpp')
       E:\Graduation-Thesis-HUST\ObfuGuard\obfuscatecff\obfuscatecff.h(14,12):
@@ -41,8 +66,17 @@ E:\Graduation-Thesis-HUST\ObfuGuard\obfuscatecff\obfuscatecff.cpp(520,17): warni
 E:\Graduation-Thesis-HUST\ObfuGuard\obfuscatecff\obfuscatecff.cpp(525,22): warning C4018: '<': signed/unsigned mismatch
 E:\Graduation-Thesis-HUST\ObfuGuard\obfuscatecff\obfuscatecff.cpp(540,169): warning C4244: '=': conversion from 'ULONGLONG' to 'uint32_t', possible loss of data
   pdbparser.cpp
+C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\include\chrono(2359,9): warning C4530: C++ exception handler used, but unwind semantics are not enabled. Specify /EHsc
+  (compiling source file 'pdbparser/pdbparser.cpp')
+  
   pe.cpp
+C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\include\chrono(2359,9): warning C4530: C++ exception handler used, but unwind semantics are not enabled. Specify /EHsc
+  (compiling source file 'pe/pe.cpp')
+  
   junkcode.cpp
+C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\include\chrono(2359,9): warning C4530: C++ exception handler used, but unwind semantics are not enabled. Specify /EHsc
+  (compiling source file 'junkcode/junkcode.cpp')
+  
 D:\vcpkg\installed\x64-windows\include\LIEF\ELF\Parser.hpp(56,54): warning C4267: 'initializing': conversion from 'size_t' to 'const uint32_t', possible loss of data
   (compiling source file 'junkcode/junkcode.cpp')
   
@@ -67,11 +101,11 @@ D:\vcpkg\installed\x64-windows\include\LIEF\PE\ResourcesManager.hpp(72,15): warn
 D:\vcpkg\installed\x64-windows\include\LIEF\PE\LoadConfigurations\LoadConfiguration.hpp(178,12): warning C4244: 'return': conversion from 'const uint64_t' to 'uint32_t', possible loss of data
   (compiling source file 'junkcode/junkcode.cpp')
   
-E:\Graduation-Thesis-HUST\ObfuGuard\junkcode\junkcode.cpp(228,51): warning C4244: 'initializing': conversion from 'const int64_t' to 'int32_t', possible loss of data
-E:\Graduation-Thesis-HUST\ObfuGuard\junkcode\junkcode.cpp(251,47): warning C4244: 'initializing': conversion from 'const int64_t' to 'int32_t', possible loss of data
+E:\Graduation-Thesis-HUST\ObfuGuard\junkcode\junkcode.cpp(229,51): warning C4244: 'initializing': conversion from 'const int64_t' to 'int32_t', possible loss of data
+E:\Graduation-Thesis-HUST\ObfuGuard\junkcode\junkcode.cpp(252,47): warning C4244: 'initializing': conversion from 'const int64_t' to 'int32_t', possible loss of data
   Generating code
   Previous IPDB not found, fall back to full compilation.
-  All 3063 functions were compiled because no usable IPDB/IOBJ from previous compilation was found.
+  All 3087 functions were compiled because no usable IPDB/IOBJ from previous compilation was found.
   Finished generating code
   ObfuGuard.vcxproj -> E:\Graduation-Thesis-HUST\x64\Release\ObfuGuard.exe
   'pwsh.exe' is not recognized as an internal or external command,
