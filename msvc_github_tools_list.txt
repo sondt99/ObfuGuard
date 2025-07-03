@@ -1,0 +1,6 @@
+TransmissionZero/MSVC-Win32-Application - https://github.com/TransmissionZero/MSVC-Win32-Application
+microsoft/vcperf - https://github.com/microsoft/vcperf
+jurplel/qView - https://github.com/jurplel/qView
+ocornut/imgui - https://github.com/ocornut/imgui
+emartisoft/nanaCppGUI_Demo - https://github.com/emartisoft/nanaCppGUI_Demo
+slint-ui/slint - https://github.com/slint-ui/slint
