@@ -9,26 +9,26 @@ import psutil
 import sys
 from typing import List, Tuple, Optional
 
-# Tắt log
+# Turn off logs
 logging.getLogger().setLevel(logging.CRITICAL)
 
 # Output files
 OUTPUT_CSV = "benchmark_runtime_only.csv"
 OUTPUT_DETAILED = "benchmark_runtime_detailed.csv"
 
-# Cấu hình benchmark
+# Benchmark configuration
 class BenchmarkConfig:
-    WARMUP_RUNS = 3              # Số lần chạy warm-up
-    MEASUREMENT_RUNS = 10        # Số lần đo chính thức
-    TIMEOUT_SECONDS = 5          # Timeout cho mỗi lần chạy
-    OUTLIER_THRESHOLD = 2.5      # Z-score để loại outliers
-    CPU_AFFINITY = 0             # CPU core cố định (None = không set)
-    HIGH_PRIORITY = True         # Chạy với priority cao
-    IDLE_TIME = 0.1              # Thời gian chờ giữa các lần đo (giây)
-    MIN_VALID_RUNS = 5           # Số lần chạy tối thiểu để kết quả hợp lệ
+    WARMUP_RUNS = 3              # Number of warm-up runs
+    MEASUREMENT_RUNS = 10        # Number of official measurement runs
+    TIMEOUT_SECONDS = 5          # Timeout for each run
+    OUTLIER_THRESHOLD = 2.5      # Z-score to remove outliers
+    CPU_AFFINITY = 0             # Fixed CPU core (None = don't set)
+    HIGH_PRIORITY = True         # Run with high priority
+    IDLE_TIME = 0.1              # Wait time between measurements (seconds)
+    MIN_VALID_RUNS = 5           # Minimum valid runs for valid results
 
 def set_process_priority():
-    """Đặt priority cao cho process benchmark"""
+    """Set high priority for benchmark process"""
     if not BenchmarkConfig.HIGH_PRIORITY:
         return
     
@@ -37,12 +37,12 @@ def set_process_priority():
         if sys.platform == "win32":
             p.nice(psutil.HIGH_PRIORITY_CLASS)
         else:
-            p.nice(-10)  # Unix/Linux (cần sudo)
+            p.nice(-10)  # Unix/Linux (requires sudo)
     except Exception as e:
-        print(f"[!] Không thể set priority cao: {e}")
+        print(f"[!] Cannot set high priority: {e}")
 
 def set_cpu_affinity():
-    """Gán process vào CPU core cố định"""
+    """Bind process to fixed CPU core"""
     if BenchmarkConfig.CPU_AFFINITY is None:
         return
     
@@ -50,21 +50,21 @@ def set_cpu_affinity():
         p = psutil.Process(os.getpid())
         p.cpu_affinity([BenchmarkConfig.CPU_AFFINITY])
     except Exception as e:
-        print(f"[!] Không thể set CPU affinity: {e}")
+        print(f"[!] Cannot set CPU affinity: {e}")
 
 def wait_for_system_idle():
-    """Đợi hệ thống ổn định trước khi đo"""
+    """Wait for system to stabilize before measurement"""
     time.sleep(BenchmarkConfig.IDLE_TIME)
     gc.collect()
-    gc.disable()  # Tắt GC trong khi đo
+    gc.disable()  # Turn off GC during measurement
 
 def restore_system_state():
-    """Khôi phục trạng thái hệ thống sau khi đo"""
+    """Restore system state after measurement"""
     gc.enable()
     gc.collect()
 
 def remove_outliers(values: List[float]) -> List[float]:
-    """Loại bỏ outliers dùng Z-score"""
+    """Remove outliers using Z-score"""
     if len(values) < 3:
         return values
     
@@ -78,9 +78,9 @@ def remove_outliers(values: List[float]) -> List[float]:
     filtered = [v for v, z in zip(values, z_scores) 
                 if abs(z) < BenchmarkConfig.OUTLIER_THRESHOLD]
     
-    # Đảm bảo còn đủ số lần đo
+    # Ensure enough measurements remain
     if len(filtered) < BenchmarkConfig.MIN_VALID_RUNS:
-        # Nếu loại quá nhiều, giữ lại MIN_VALID_RUNS giá trị gần mean nhất
+        # If too many are removed, keep MIN_VALID_RUNS values closest to mean
         sorted_by_distance = sorted(values, key=lambda x: abs(x - mean))
         return sorted_by_distance[:BenchmarkConfig.MIN_VALID_RUNS]
     
@@ -88,16 +88,16 @@ def remove_outliers(values: List[float]) -> List[float]:
 
 def single_runtime_measurement(path: str) -> Tuple[float, bool]:
     """
-    Đo runtime một lần
+    Measure runtime once
     Returns: (runtime_ms, is_valid)
     """
     wait_for_system_idle()
     
     try:
-        # Dùng perf_counter_ns cho độ chính xác cao nhất
+        # Use perf_counter_ns for highest accuracy
         start_ns = time.perf_counter_ns()
         
-        # Cấu hình subprocess để giảm overhead
+        # Configure subprocess to reduce overhead
         startupinfo = None
         if os.name == 'nt':
             startupinfo = subprocess.STARTUPINFO()
@@ -119,9 +119,9 @@ def single_runtime_measurement(path: str) -> Tuple[float, bool]:
         
         restore_system_state()
         
-        # Kiểm tra exit code
+        # Check exit code
         if result.returncode != 0:
-            print(f"  [!] Exit code khác 0: {result.returncode}")
+            print(f"  [!] Non-zero exit code: {result.returncode}")
             return runtime_ms, False
         
         return runtime_ms, True
@@ -131,13 +131,13 @@ def single_runtime_measurement(path: str) -> Tuple[float, bool]:
         return -1, False
     except Exception as e:
         restore_system_state()
-        print(f"  [!] Lỗi: {e}")
+        print(f"  [!] Error: {e}")
         return -2, False
 
 def benchmark_runtime_with_stats(path: str) -> Optional[dict]:
     """
-    Chạy benchmark nhiều lần và tính statistics
-    Returns: dict với các metrics hoặc None nếu lỗi
+    Run benchmark multiple times and calculate statistics
+    Returns: dict with metrics or None if error
     """
     print(f"\n[*] Benchmarking: {os.path.basename(path)}")
     
@@ -165,14 +165,14 @@ def benchmark_runtime_with_stats(path: str) -> Optional[dict]:
     print(" done")
     
     if len(valid_runs) < BenchmarkConfig.MIN_VALID_RUNS:
-        print(f"  [!] Không đủ lần chạy hợp lệ ({len(valid_runs)}/{BenchmarkConfig.MIN_VALID_RUNS})")
+        print(f"  [!] Not enough valid runs ({len(valid_runs)}/{BenchmarkConfig.MIN_VALID_RUNS})")
         return None
     
-    # Loại outliers
+    # Remove outliers
     filtered_runs = remove_outliers(valid_runs)
     outliers_removed = len(valid_runs) - len(filtered_runs)
-    
-    # Tính statistics
+
+    # Calculate statistics
     stats = {
         'mean': statistics.mean(filtered_runs),
         'median': statistics.median(filtered_runs),
@@ -185,7 +185,7 @@ def benchmark_runtime_with_stats(path: str) -> Optional[dict]:
         'cv': 0  # Coefficient of variation
     }
     
-    # Tính CV (độ biến thiên tương đối)
+    # Calculate CV (coefficient of variation)
     if stats['mean'] > 0:
         stats['cv'] = (stats['stdev'] / stats['mean']) * 100
     
@@ -204,8 +204,8 @@ def find_original_binaries(root="."):
                 yield os.path.join(subdir, f)
 
 def write_csv_headers():
-    """Tạo headers cho cả 2 file CSV"""
-    # CSV chính (summary)
+    """Create headers for both CSV files"""
+    # Main CSV (summary)
     fieldnames_main = [
         "Original", "Variant", "Type",
         "runtime_orig_mean", "runtime_variant_mean", "runtime_diff(%)",
@@ -213,8 +213,8 @@ def write_csv_headers():
     ]
     with open(OUTPUT_CSV, "w", newline="", encoding="utf-8") as f:
         csv.DictWriter(f, fieldnames=fieldnames_main).writeheader()
-    
-    # CSV chi tiết
+
+    # Detailed CSV
     fieldnames_detail = [
         "Binary", "Type", "Mean", "Median", "StdDev", "Min", "Max",
         "CV(%)", "ValidRuns", "TotalRuns", "OutliersRemoved"
@@ -223,7 +223,7 @@ def write_csv_headers():
         csv.DictWriter(f, fieldnames=fieldnames_detail).writeheader()
 
 def append_detailed_stats(binary_path, binary_type, stats):
-    """Ghi statistics chi tiết"""
+    """Write detailed statistics"""
     row = {
         "Binary": os.path.basename(binary_path),
         "Type": binary_type,
@@ -241,7 +241,7 @@ def append_detailed_stats(binary_path, binary_type, stats):
         csv.DictWriter(f, fieldnames=row.keys()).writerow(row)
 
 def append_comparison_row(orig_path, variant_path, variant_type, orig_stats, variant_stats):
-    """Ghi so sánh vào CSV chính"""
+    """Write comparison to main CSV"""
     row = {
         "Original": os.path.basename(orig_path),
         "Variant": os.path.basename(variant_path),
@@ -263,21 +263,21 @@ def main():
     print(f"CPU affinity: {BenchmarkConfig.CPU_AFFINITY}")
     print(f"High priority: {BenchmarkConfig.HIGH_PRIORITY}")
     
-    # Setup hệ thống
+    # System setup
     set_process_priority()
     set_cpu_affinity()
-    
-    # Tạo CSV headers
+
+    # Create CSV headers
     write_csv_headers()
     
     # Benchmark
     for orig in find_original_binaries("../binary_test"):
         orig_stats = benchmark_runtime_with_stats(orig)
         if not orig_stats:
-            print(f"[!] Bỏ qua {orig} do lỗi benchmark")
+            print(f"[!] Skipping {orig} due to benchmark error")
             continue
-        
-        # Ghi stats chi tiết của original
+
+        # Write detailed stats of original
         append_detailed_stats(orig, "original", orig_stats)
         
         base_name, _ = os.path.splitext(orig)
@@ -288,23 +288,23 @@ def main():
             
             variant_stats = benchmark_runtime_with_stats(variant_path)
             if not variant_stats:
-                print(f"[!] Bỏ qua {variant_path} do lỗi benchmark")
+                print(f"[!] Skipping {variant_path} due to benchmark error")
                 continue
             
-            # Ghi stats chi tiết của variant
+            # Write detailed stats of variant
             append_detailed_stats(variant_path, variant_type, variant_stats)
-            
-            # Ghi comparison
+
+            # Write comparison
             append_comparison_row(orig, variant_path, variant_type, orig_stats, variant_stats)
-            
-            # Hiển thị kết quả
+
+            # Display results
             diff = percent_diff(variant_stats['mean'], orig_stats['mean'])
             print(f"[✓] {variant_type.upper()}: {diff:+.2f}% "
                   f"({orig_stats['mean']:.3f}ms → {variant_stats['mean']:.3f}ms)")
 
-    print(f"\n✅ Hoàn tất!")
-    print(f"📊 Kết quả summary: {OUTPUT_CSV}")
-    print(f"📊 Kết quả chi tiết: {OUTPUT_DETAILED}")
+    print(f"\n✅ Completed!")
+    print(f"📊 Summary results: {OUTPUT_CSV}")
+    print(f"📊 Detailed results: {OUTPUT_DETAILED}")
 
 if __name__ == "__main__":
     main()

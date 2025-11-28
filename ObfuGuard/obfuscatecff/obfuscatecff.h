@@ -9,17 +9,17 @@
 #include <asmjit/asmjit.h>
 using namespace asmjit;
 
-class obfuscatecff { // Lớp thực hiện làm rối luồng điều khiển (Control Flow Flattening)
+class obfuscatecff { // Class that performs control flow flattening obfuscation
 private:
-    struct instruction_t; // Cấu trúc mô tả một lệnh máy
-	struct function_t; // Cấu trúc mô tả một hàm
+    struct instruction_t; // Structure describing a machine instruction
+	struct function_t; // Structure describing a function
 
     pe64* pe;
     struct func_id_instr_id {
         int func_id;
         int inst_index;
     };
-    // map theo dõi địa chỉ thời gian chạy -> lệnh
+    // map tracking runtime address -> instruction
     std::map<uint64_t, func_id_instr_id> runtime_addr_track;
 
     static int instruction_id;
@@ -27,7 +27,7 @@ private:
 
     static std::unordered_map<ZydisRegister_, x86::Gp> lookupmap;
 
-    //sinh mã bằng asmjit 
+    // generate code using asmjit 
     JitRuntime rt;
     CodeHolder code;
     x86::Assembler assm;
@@ -54,10 +54,10 @@ private:
 
     void compile(PIMAGE_SECTION_HEADER new_section);
 
-    // Dịch ngược mã máy vừa sinh ra thành instruction_t để xử lý tiếp
+    // Reverse translate generated machine code to instruction_t for further processing
     std::vector<instruction_t> instructions_from_jit(uint8_t* code, uint32_t size);
 
-    // Áp dụng kỹ thuật control flow flattening cho một hàm
+    // Apply control flow flattening technique to a function
     bool apply_control_flow_flattening(std::vector<obfuscatecff::function_t>::iterator& func_iter);
 
     __declspec(safebuffers) int custom_main(int argc, char* argv[]);
@@ -104,8 +104,8 @@ public:
             zyinstr{} {
         }
 
-        void load_relative_info(); // Lấy thông tin nhảy tương đối từ lệnh Zydis
-        void load(int funcid, std::vector<uint8_t> raw_data); // Tải từ mã thô
+        void load_relative_info(); // Get relative jump information from Zydis instruction
+        void load(int funcid, std::vector<uint8_t> raw_data); // Load from raw bytes
         void load(int funcid, ZydisDisassembledInstruction zyinstruction, uint64_t runtime_address);
         void reload();
         void print();

@@ -28,7 +28,7 @@ void print_menu() {
     std::cout << "Enter your choice (0-2): ";
 }
 
-// Lấy tệp đầu vào và kiểm tra tính hợp lệ
+// Get input file and validate it
 bool get_file_input(const std::string& prompt, std::string& file_path) {
     std::cout << prompt;
     std::getline(std::cin, file_path);
@@ -47,7 +47,7 @@ bool get_file_input(const std::string& prompt, std::string& file_path) {
     return true;
 }
 
-// Tự động phát hiện kiến trúc tệp PE
+// Automatically detect PE file architecture
 bool DetectPEArchitecture(const std::string& filePath, bool& is64Bit) {
     std::ifstream peFile(filePath, std::ios::binary);
     if (!peFile.is_open()) {
@@ -55,7 +55,7 @@ bool DetectPEArchitecture(const std::string& filePath, bool& is64Bit) {
         return false;
     }
 
-    // Đọc DOS header
+    // Read DOS header
     IMAGE_DOS_HEADER dosHeader;
     if (!peFile.read(reinterpret_cast<char*>(&dosHeader), sizeof(IMAGE_DOS_HEADER))) {
         std::cerr << "Error [DetectPE]: Could not read DOS header from: " << filePath << std::endl;
@@ -63,21 +63,21 @@ bool DetectPEArchitecture(const std::string& filePath, bool& is64Bit) {
         return false;
     }
 
-    // Kiểm tra chữ ký DOS (MZ)
+    // Check DOS signature (MZ)
     if (dosHeader.e_magic != IMAGE_DOS_SIGNATURE) { // 0x5A4D (MZ)
         std::cerr << "Error [DetectPE]: Not a valid PE file (Missing MZ signature): " << filePath << std::endl;
         peFile.close();
         return false;
     }
 
-    // Kiểm tra e_lfanew để đảm bảo nó là hợp lệ
+    // Check e_lfanew to ensure it is valid
     if (dosHeader.e_lfanew == 0 || static_cast<long>(dosHeader.e_lfanew) < 0) {
         std::cerr << "Error [DetectPE]: Invalid PE header offset (e_lfanew is " << dosHeader.e_lfanew << ") in: " << filePath << std::endl;
         peFile.close();
         return false;
     }
 
-    // Đến vị trí của PE header
+    // Go to PE header position
     peFile.seekg(dosHeader.e_lfanew, std::ios::beg);
     if (peFile.fail()) {
         std::cerr << "Error [DetectPE]: Failed to seek to PE header (e_lfanew: 0x"
@@ -86,7 +86,7 @@ bool DetectPEArchitecture(const std::string& filePath, bool& is64Bit) {
         return false;
     }
 
-    // Đọc PE signature
+    // Read PE signature
     DWORD signature;
     if (!peFile.read(reinterpret_cast<char*>(&signature), sizeof(DWORD))) {
         std::cerr << "Error [DetectPE]: Could not read PE signature from: " << filePath << std::endl;
@@ -94,14 +94,14 @@ bool DetectPEArchitecture(const std::string& filePath, bool& is64Bit) {
         return false;
     }
 
-    // Kiểm tra chữ ký PE (PE00)
+    // Check PE signature (PE00)
     if (signature != IMAGE_NT_SIGNATURE) { // 0x00004550 (PE00)
         std::cerr << "Error [DetectPE]: Not a valid PE file (Missing PE signature 'PE00'): " << filePath << std::endl;
         peFile.close();
         return false;
     }
 
-    // Đọc File header
+    // Read File header
     IMAGE_FILE_HEADER fileHeader;
     if (!peFile.read(reinterpret_cast<char*>(&fileHeader), sizeof(IMAGE_FILE_HEADER))) {
         std::cerr << "Error [DetectPE]: Could not read File header from: " << filePath << std::endl;
@@ -110,8 +110,8 @@ bool DetectPEArchitecture(const std::string& filePath, bool& is64Bit) {
     }
 
     WORD magic;
-    // Đến Optional header
-    if (!peFile.read(reinterpret_cast<char*>(&magic), sizeof(WORD))) { // Đọc Magic number
+    // Go to Optional header
+    if (!peFile.read(reinterpret_cast<char*>(&magic), sizeof(WORD))) { // Read Magic number
         std::cerr << "Error [DetectPE]: Could not read Magic number from OptionalHeader in: " << filePath << std::endl;
         peFile.close();
         return false;
@@ -119,7 +119,7 @@ bool DetectPEArchitecture(const std::string& filePath, bool& is64Bit) {
 
     peFile.close();
 
-    // Kiểm tra Magic number để xác định kiến trúc
+    // Check Magic number to determine architecture
     if (magic == IMAGE_NT_OPTIONAL_HDR32_MAGIC) { // 0x10b
         is64Bit = false; // 32-bit
         return true;
@@ -134,7 +134,7 @@ bool DetectPEArchitecture(const std::string& filePath, bool& is64Bit) {
     }
 }
 
-// Hàm lấy và kiểm tra file PE
+// Function to get and validate PE file
 bool get_valid_pe_file_path(const std::string& prompt, std::string& path, bool& is_64_bit) {
     if (!get_file_input(prompt, path)) return false;
     if (!DetectPEArchitecture(path, is_64_bit)) {
@@ -144,7 +144,7 @@ bool get_valid_pe_file_path(const std::string& prompt, std::string& path, bool& 
     return true;
 }
 
-// Hàm tạo output file path
+// Function to create output file path
 std::string build_output_path(const std::string& input_path, const std::string& suffix) {
     std::filesystem::path p(input_path);
     std::string stem = p.stem().string();
@@ -154,14 +154,14 @@ std::string build_output_path(const std::string& input_path, const std::string& 
         std::filesystem::path(stem + suffix + extension)).lexically_normal().string();
 }
 
-// Hàm in thời gian thực thi
+// Function to print execution time
 void print_execution_time(clock_t begin_time, const std::string& mode_name) {
     std::cout << mode_name << " completed in "
         << static_cast<float>(clock() - begin_time) / CLOCKS_PER_SEC
         << " seconds." << std::endl;
 }
 
-// Hàm chính cho chế độ làm rối mã điều khiển luồng (CFF - Control Flow Flattening)
+// Main function for control flow flattening (CFF) mode
 int mode_control_flow_flattening() {
     std::cout << "\n=== Control Flow Flattening Mode ===\n";
     std::string binary_path;
@@ -176,13 +176,13 @@ int mode_control_flow_flattening() {
 
     std::cout << "Control Flow Flattening Mode: Detected 64-bit PE" << std::endl;
 
-    const clock_t begin_time = clock(); // Bắt đầu tính thời gian thực hiện
+    const clock_t begin_time = clock(); // Start timing execution
 
     try {
         pe64 pe(binary_path);
 
         pdbparser pdb(&pe);
-        // Đẩy PDB từ tệp PE
+        // Extract PDB from PE file
         auto functions = pdb.parse_functions();
         if (functions.empty()) {
             std::cout << "Warning: No functions found through PDB. Obfuscation might not be effective or possible." << std::endl;
@@ -191,16 +191,16 @@ int mode_control_flow_flattening() {
             std::cout << "Successfully analyzed all functions." << std::endl;
         }
 
-        std::cout << "Creating new section .0Cff" << std::endl; // Tạo section mới cho mã đã làm rối
+        std::cout << "Creating new section .0Cff" << std::endl; // Create new section for obfuscated code
         auto new_section = pe.create_section(".0Cff", 10000000, IMAGE_SCN_MEM_EXECUTE | IMAGE_SCN_MEM_READ | IMAGE_SCN_CNT_CODE);
 
-        obfuscatecff obf(&pe); // Tạo đối tượng obfuscatecff với tệp PE
-        obf.create_functions(functions); // Tạo các hàm bổ sung từ PDB đã phân tích
+        obfuscatecff obf(&pe); // Create obfuscatecff object with PE file
+        obf.create_functions(functions); // Create additional functions from analyzed PDB
 
         std::cout << "Running Control Flow Flattening Mode" << std::endl;
-        obf.run(new_section, true); // Chạy làm rối mã điều khiển luồng (CFF) với section mới và tạo hàm bổ sung
+        obf.run(new_section, true); // Run control flow flattening (CFF) with new section and create additional functions
 
-        // Lưu tệp PE đã làm rối
+        // Save obfuscated PE file
         std::string output_filename_str = build_output_path(binary_path, ".cff");
 
         std::cout << "\nSuccessfully control-flow-flattened " << functions.size() << " selected function(s)." << std::endl;
@@ -220,7 +220,7 @@ int mode_control_flow_flattening() {
     return 0;
 }
 
-// Hàm chính cho chế độ chèn mã rối (Junk Code) với Trampoline
+// Main function for junk code injection mode with Trampoline
 int mode_trampoline_junkcode() {
     std::cout << "\n=== Junk Code Injection with Trampoline Mode ===\n";
     std::string input_pe_path;
@@ -234,7 +234,7 @@ int mode_trampoline_junkcode() {
 
     std::string output_pe_path = build_output_path(input_pe_path, ".junk");
 
-    // Lựa chọn chế độ tự động hay thủ công
+    // Choose automatic or manual mode
     std::string mode_choice;
     std::cout << "\nSelect injection mode:\n  1. Auto-inject functions\n  2. Manually choose multiple functions\nEnter your choice (1 or 2): ";
     std::getline(std::cin, mode_choice);

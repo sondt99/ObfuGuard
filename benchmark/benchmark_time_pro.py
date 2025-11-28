@@ -4,7 +4,7 @@ import time
 import logging
 import angr
 
-# Ẩn log để terminal gọn
+# Hide logs to keep terminal clean
 for lib in ["angr", "cle", "pyvex"]:
     logging.getLogger(lib).setLevel(logging.CRITICAL)
 
@@ -14,7 +14,7 @@ def get_text_section(project):
     return next((s for s in project.loader.main_object.sections if s.name == ".text"), None)
 
 def analyze_timing_ms(path: str) -> dict:
-    # WARM-UP RUN — không đo, chỉ để cache được thiết lập
+    # WARM-UP RUN — not measured, just to set up cache
     try:
         project_warm = angr.Project(path, auto_load_libs=False)
         _ = project_warm.analyses.CFGFast(normalize=True)
@@ -22,9 +22,9 @@ def analyze_timing_ms(path: str) -> dict:
         if text:
             _ = project_warm.loader.memory.load(text.vaddr, text.memsize)
     except Exception:
-        pass  # nếu warm-up lỗi, cứ tiếp tục đo thật
+        pass  # if warm-up fails, continue with actual measurement
 
-    # MAIN RUN — bắt đầu đo thực sự
+    # MAIN RUN — start actual measurement
     t0 = time.perf_counter()
 
     # Load binary
@@ -32,7 +32,7 @@ def analyze_timing_ms(path: str) -> dict:
     project = angr.Project(path, auto_load_libs=False)
     t_load1 = time.perf_counter()
 
-    # Dựng CFGFast
+    # Build CFGFast
     t_cfg0 = time.perf_counter()
     _ = project.analyses.CFGFast(normalize=True)
     t_cfg1 = time.perf_counter()
@@ -91,7 +91,7 @@ def main():
         try:
             base_metrics = analyze_timing_ms(orig)
         except Exception as e:
-            print(f"[!] Lỗi khi phân tích gốc {orig}: {e}")
+            print(f"[!] Error analyzing original {orig}: {e}")
             continue
 
         base_name, _ = os.path.splitext(orig)
@@ -102,11 +102,11 @@ def main():
             try:
                 variant_metrics = analyze_timing_ms(variant_path)
                 append_comparison_row(orig, variant_path, variant_type, base_metrics, variant_metrics)
-                print(f"[✓] So sánh {os.path.basename(orig)} → {os.path.basename(variant_path)} xong.")
+                print(f"[✓] Comparison {os.path.basename(orig)} → {os.path.basename(variant_path)} completed.")
             except Exception as e:
-                print(f"[!] Lỗi phân tích {variant_path}: {e}")
+                print(f"[!] Error analyzing {variant_path}: {e}")
 
-    print(f"\n✅ Đã hoàn tất. Kết quả lưu tại: {OUTPUT_CSV}")
+    print(f"\n✅ Completed. Results saved to: {OUTPUT_CSV}")
 
 if __name__ == "__main__":
     main()

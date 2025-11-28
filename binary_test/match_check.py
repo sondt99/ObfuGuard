@@ -14,8 +14,8 @@ def run_binary(exe_path: Path):
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             timeout=5,
-            input=b'',  # thêm input nếu binary yêu cầu
-            shell=True  # để chạy được .exe
+            input=b'',  # add input if binary requires
+            shell=True  # to run .exe
         )
         return result.stdout.decode(errors='ignore').strip()
     except Exception as e:

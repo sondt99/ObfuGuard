@@ -12,7 +12,7 @@ ZydisDecoder decoder;
 int obfuscatecff::instruction_id = 0;
 int obfuscatecff::function_iterator = 0;
 
-// Hàm xoay phải 32 bit
+// 32-bit right rotation function
 __forceinline int _strcmp(const char* s1, const char* s2)
 {
 	while (*s1 && (*s1 == *s2))
@@ -23,9 +23,9 @@ __forceinline int _strcmp(const char* s1, const char* s2)
 	return *(const unsigned char*)s1 - *(const unsigned char*)s2;
 }
 
-// Hàm khởi tạo obfuscatecff với đối tượng pe64
+// Initialize obfuscatecff with pe64 object
 obfuscatecff::obfuscatecff(pe64* pe) 
-    : total_size_used(0) // khởi tạo total_size_used 0
+    : total_size_used(0) // initialize total_size_used to 0
 {
 	this->pe = pe;
 	if (!ZYAN_SUCCESS(ZydisDecoderInit(&decoder, ZYDIS_MACHINE_MODE_LONG_64, ZYDIS_STACK_WIDTH_64)))
@@ -34,38 +34,38 @@ obfuscatecff::obfuscatecff(pe64* pe)
 		throw std::runtime_error("failed to init formatter");
 }
 
-// Khởi tạo danh sách các hàm theo cấu trúc function_t từ pdbparser
+// Initialize function list from pdbparser with function_t structure
 void obfuscatecff::create_functions(std::vector<pdbparser::sym_func>functions) {
 
-	auto text_section = this->pe->get_section(".text"); // tìm section .text trong tệp PE
+	auto text_section = this->pe->get_section(".text"); // find .text section in PE file
 
 	if (!text_section)
 		throw std::runtime_error("couldn't find .text section");
 
-	std::vector<uint32_t>visited_rvas; // danh sách các rva đã được phân tích
+	std::vector<uint32_t>visited_rvas; // list of analyzed RVAs
 
-	// khởi tạo các hàm trong tệp PE từ pdbparser
+	// initialize functions in PE file from pdbparser
 	for (auto function : functions) {
-		if (function.obfuscate == false) // nếu hàm không được đánh dấu để obfuscate thì bỏ qua
+		if (function.obfuscate == false) // skip function if not marked for obfuscation
 			continue;
-		if (std::find(visited_rvas.begin(), visited_rvas.end(), function.offset) != visited_rvas.end()) // nếu rva đã được phân tích thì bỏ qua
+		if (std::find(visited_rvas.begin(), visited_rvas.end(), function.offset) != visited_rvas.end()) // skip if RVA already analyzed
 			continue;
-		if (function.size < 5) // kích thước hàm quá nhỏ thì bỏ qua
+		if (function.size < 5) // skip if function size is too small
 			continue;
 
 		ZydisDisassembledInstruction zyinstruction{};
 
-		// tính toán địa chỉ của hàm trong bộ nhớ
+		// calculate the address of the function in memory
 		auto address_to_analyze = this->pe->get_buffer()->data() + text_section->VirtualAddress + function.offset;
 		uint32_t offset = 0;
 
-		function_t new_function(function_iterator++, function.name, function.offset, function.size); // khởi tạo một đối tượng function_t mới với các thông tin từ pdbparser
+		function_t new_function(function_iterator++, function.name, function.offset, function.size); // initialize a new function_t object with information from pdbparser
 
-		new_function.ctfflattening = function.ctfflattening; // nếu hàm được đánh dấu để flattening thì đánh dấu trong đối tượng function_t
+		new_function.ctfflattening = function.ctfflattening; // if function is marked for flattening then mark in function_t object
 
-		std::vector <uint64_t> runtime_addresses; // danh sách các địa chỉ runtime của các câu lệnh trong hàm
+		std::vector <uint64_t> runtime_addresses; // list of runtime addresses of instructions in the function
 
-		while (ZYAN_SUCCESS(ZydisDisassembleIntel(ZYDIS_MACHINE_MODE_LONG_64, (ZyanU64)(address_to_analyze + offset), (const void*)(address_to_analyze + offset), function.size - offset, &zyinstruction))) { // phân tích từng câu lệnh trong hàm
+		while (ZYAN_SUCCESS(ZydisDisassembleIntel(ZYDIS_MACHINE_MODE_LONG_64, (ZyanU64)(address_to_analyze + offset), (const void*)(address_to_analyze + offset), function.size - offset, &zyinstruction))) { // analyze each instruction in the function
 
 			instruction_t new_instruction{};
 			new_instruction.runtime_address = (uint64_t)address_to_analyze + offset;
@@ -82,8 +82,8 @@ void obfuscatecff::create_functions(std::vector<pdbparser::sym_func>functions) {
 			new_function.inst_id_index[new_instruction.inst_id] = inst_index;
 		}
 
-		visited_rvas.push_back(function.offset); // đánh dấu rva đã được phân tích
-		this->functions.push_back(new_function); // thêm hàm mới vào danh sách các hàm
+		visited_rvas.push_back(function.offset); // mark RVA as analyzed
+		this->functions.push_back(new_function); // add new function to the function list
 
 		for (auto runtime_address = runtime_addresses.begin(); runtime_address != runtime_addresses.end(); ++runtime_address) {
 			this->runtime_addr_track[*runtime_address].func_id = new_function.func_id;
@@ -92,19 +92,19 @@ void obfuscatecff::create_functions(std::vector<pdbparser::sym_func>functions) {
 
 }
 
-// Dùng safebuffers để đảm bảo an toàn bộ đệm khi nhảy vào entrypoint đã vá lại
+// Use safebuffers to ensure buffer safety when jumping to the patched entrypoint
 __declspec(safebuffers) int obfuscatecff::custom_main(int argc, char* argv[]) {
-	// Lấy địa chỉ PEB thông qua GS register
+	// Get PEB address through GS register
 	uint64_t peb_address = __readgsqword(0x60);
 
-	// Lấy base address của tiến trình từ PEB
+	// Get base address of the process from PEB
 	uint64_t module_base = *(uint64_t*)(peb_address + 0x10);
 
-	// Lấy con trỏ đến NT Headers
+	// Get pointer to NT Headers
 	auto dos_header = (PIMAGE_DOS_HEADER)module_base;
 	auto nt_headers = (PIMAGE_NT_HEADERS)(module_base + dos_header->e_lfanew);
 
-	// Tìm section có tên ".0Dev"
+	// Find section with name ".0Dev"
 	PIMAGE_SECTION_HEADER target_section = nullptr;
 	auto section_headers = IMAGE_FIRST_SECTION(nt_headers);
 
@@ -118,26 +118,26 @@ __declspec(safebuffers) int obfuscatecff::custom_main(int argc, char* argv[]) {
 	}
 
 	if (!target_section) {
-		return -1; // Không tìm thấy section
+		return -1; // Section not found
 	}
 
-	// Lấy entrypoint đã bị mã hóa từ section ".0Dev"
+	// Get encoded entrypoint from section ".0Dev"
 	uint32_t encoded_entry = *(uint32_t*)(module_base + target_section->VirtualAddress);
 
-	// Giải mã entrypoint
+	// Decode entrypoint
 	encoded_entry ^= nt_headers->OptionalHeader.SizeOfStackCommit;
 	encoded_entry = _rotr(encoded_entry, nt_headers->FileHeader.TimeDateStamp);
 
-	// Gọi hàm main thực sự tại địa chỉ đã giải mã
+	// Call the actual main function at the decoded address
 	using MainFunc = int(*)(int, char**);
 	MainFunc real_main = reinterpret_cast<MainFunc>(module_base + encoded_entry);
 	return real_main(argc, argv);
 }
 
 
-// Tìm instruction tại địa chỉ runtime cụ thể
+// Find instruction at specific runtime address
 bool obfuscatecff::find_inst_at_dst(uint64_t target_addr, instruction_t** out_instruction, function_t** out_function) {
-	// Kiểm tra xem địa chỉ có nằm trong bản ghi runtime không
+	// Check if address is in runtime records
 	auto it = runtime_addr_track.find(target_addr);
 	if (it == runtime_addr_track.end()) {
 		return false;
@@ -146,38 +146,38 @@ bool obfuscatecff::find_inst_at_dst(uint64_t target_addr, instruction_t** out_in
 	const auto& track_info = it->second;
 	*out_function = &functions[track_info.func_id];
 
-	// Nếu hàm có sử dụng jump tables thì bỏ qua
+	// If function uses jump tables then skip
 	if ((*out_function)->has_jumptables) {
 		return false;
 	}
 
-	// Trả về con trỏ đến instruction tương ứng
+	// Return pointer to corresponding instruction
 	*out_instruction = &(*out_function)->instructions[track_info.inst_index];
 	return true;
 }
 
-// Đánh dấu các hàm có sử dụng jump table để loại trừ khỏi xử lý sau này
+// Mark functions that use jump tables to exclude from later processing
 void obfuscatecff::remove_jumptables() {
 	for (auto& func : functions) {
 		for (auto& instr : func.instructions) {
-			// Kiểm tra xem instruction có tham chiếu tương đối 32-bit, không phải jump/call
+			// Check if instruction has 32-bit relative reference, not jump/call
 			if (instr.has_relative && !instr.isjmpcall && instr.relative.size == 32) {
 
-				// Tính địa chỉ thực mà instruction này tham chiếu đến
+				// Calculate the actual address that this instruction references
 				int32_t rel_offset = *(int32_t*)(&instr.raw_bytes[instr.relative.offset]);
 				uint64_t resolved_address = instr.runtime_address + rel_offset + instr.zyinstr.info.length;
 
-				// Nếu địa chỉ trỏ về đầu file buffer, đánh dấu hàm này có jumptable
+				// If address points to beginning of file buffer, mark this function as having jumptable
 				if (resolved_address == (uint64_t)this->pe->get_buffer()->data()) {
 					func.has_jumptables = true;
-					break; // Không cần kiểm tra thêm instruction nào trong hàm này
+					break; // No need to check more instructions in this function
 				}
 			}
 		}
 	}
 }
 
-// phân tích các hàm phù hợp để obfuscate và phân tích các câu lệnh liên quan đến địa chỉ tương đối của hàm
+// analyze suitable functions for obfuscation and analyze instructions related to relative addresses of the function
 bool obfuscatecff::analyze_functions() {
 
 	this->remove_jumptables();
@@ -231,17 +231,17 @@ bool obfuscatecff::analyze_functions() {
 	return true;
 }
 
-// relocate đoạn mã trong section
+// relocate code segment in section
 void obfuscatecff::relocate(PIMAGE_SECTION_HEADER new_section) {
 	auto base = pe->get_buffer()->data() + 0x1000;
 	int used_memory = 0;
-	for (auto func = functions.begin(); func != functions.end(); ++func) { // lặp qua từng hàm trong danh sách
+	for (auto func = functions.begin(); func != functions.end(); ++func) { // iterate through each function in the list
 		if (func->has_jumptables)
 			continue;
-		uint32_t dst = new_section->VirtualAddress + used_memory; // tính toán địa chỉ đích của hàm trong bộ nhớ mới
+		uint32_t dst = new_section->VirtualAddress + used_memory; // calculate destination address of function in new memory
 		int instr_ctr = 0;
 		for (auto instruction = func->instructions.begin(); instruction != func->instructions.end(); ++instruction) {
-			// cập nhật địa chỉ relocated_address của câu lệnh
+			// update relocated_address of instruction
 			instruction->relocated_address = (uint64_t)base + dst + instr_ctr;
 			instr_ctr += instruction->zyinstr.info.length;
 		}
@@ -250,7 +250,7 @@ void obfuscatecff::relocate(PIMAGE_SECTION_HEADER new_section) {
 	this->total_size_used = used_memory + 0x1000;
 }
 
-// tìm câu lệnh dựa trên id lệnh và id hàm
+// find instruction based on instruction id and function id
 bool obfuscatecff::find_instruction_by_id(int funcid, int instid, instruction_t* inst) {
 
 	auto func = std::find_if(this->functions.begin(), this->functions.end(), [&](const obfuscatecff::function_t& func) {
@@ -270,7 +270,7 @@ bool obfuscatecff::find_instruction_by_id(int funcid, int instid, instruction_t*
 	return false;
 }
 
-//chuyển đổi các lệnh nhảy sang dạng 16 bit
+//convert jump instructions to 16-bit form
 uint16_t rel8_to16(ZydisMnemonic mnemonic) {
 	static const std::unordered_map<ZydisMnemonic, uint16_t> jump_map = {
 		{ZYDIS_MNEMONIC_JNBE, 0x870F},
@@ -295,7 +295,7 @@ uint16_t rel8_to16(ZydisMnemonic mnemonic) {
 	return (it != jump_map.end()) ? it->second : 0;
 }
 
-// sửa các lệnh nhảy theo địa chỉ tương đối
+// fix jump instructions by relative address
 bool obfuscatecff::fix_relative_jmps(function_t* func) {
 
 	for (auto instruction_iter = func->instructions.begin(); instruction_iter != func->instructions.end(); instruction_iter++) {
@@ -378,7 +378,7 @@ bool obfuscatecff::fix_relative_jmps(function_t* func) {
 	return true;
 }
 
-// áp dụng fix relative jmp cho tất cả các hàm không có jumptable
+// apply relative jmp fix for all functions without jumptables
 bool obfuscatecff::convert_relative_jmps() {
 	for (auto func = functions.begin(); func != functions.end(); ++func) {
 
@@ -391,7 +391,7 @@ bool obfuscatecff::convert_relative_jmps() {
 	return true;
 }
 
-// Thực hiện relocate, cập nhật lại các operand tương đối 
+// Perform relocation, update relative operands 
 bool obfuscatecff::apply_relocations(PIMAGE_SECTION_HEADER new_section) {
 
 	this->relocate(new_section);
@@ -495,7 +495,7 @@ bool obfuscatecff::apply_relocations(PIMAGE_SECTION_HEADER new_section) {
 	return true;
 }
 
-// biên dịch lại tệp nhị phân
+// recompile the binary file
 void obfuscatecff::compile(PIMAGE_SECTION_HEADER new_section) {
 
 	const PIMAGE_SECTION_HEADER current_image_section = IMAGE_FIRST_SECTION(this->pe->get_nt());
@@ -532,7 +532,7 @@ void obfuscatecff::compile(PIMAGE_SECTION_HEADER new_section) {
 
 }
 
-void obfuscatecff::run(PIMAGE_SECTION_HEADER new_section, bool obfuscate_entry_point) { // luồng xử lý làm rối mã trên Control Flow Flattening (CFF)
+void obfuscatecff::run(PIMAGE_SECTION_HEADER new_section, bool obfuscate_entry_point) { // processing flow for code obfuscation on Control Flow Flattening (CFF)
 
 	if (!this->analyze_functions())
 		throw std::runtime_error("Error when analyzing function");
@@ -562,11 +562,11 @@ void obfuscatecff::run(PIMAGE_SECTION_HEADER new_section, bool obfuscate_entry_p
 
 }
 
-uint32_t obfuscatecff::get_added_size() { // tổng bộ nhớ đã obfu
+uint32_t obfuscatecff::get_added_size() { // total memory obfuscated
 	return this->total_size_used;
 }
 
-std::vector<obfuscatecff::instruction_t>obfuscatecff::instructions_from_jit(uint8_t* code, uint32_t size) { // dịch các câu lệnh hợp ngữ từ biên dịch just-in-time (jit)
+std::vector<obfuscatecff::instruction_t>obfuscatecff::instructions_from_jit(uint8_t* code, uint32_t size) { // translate assembly instructions from just-in-time (jit) compilation
 
 	std::vector<instruction_t>instr;
 
@@ -583,7 +583,7 @@ std::vector<obfuscatecff::instruction_t>obfuscatecff::instructions_from_jit(uint
 	return instr;
 }
 
-bool is_jmpcall(const ZydisDecodedInstruction& instr) { // kiểm tra xem câu lệnh có phải là jump/call hay không
+bool is_jmpcall(const ZydisDecodedInstruction& instr) { // check if instruction is a jump/call instruction
 	static const std::unordered_set<ZydisMnemonic> jmpcall_mnemonics = {
 		ZYDIS_MNEMONIC_JNBE, ZYDIS_MNEMONIC_JB,    ZYDIS_MNEMONIC_JBE,
 		ZYDIS_MNEMONIC_JCXZ, ZYDIS_MNEMONIC_JECXZ, ZYDIS_MNEMONIC_JKNZD,
@@ -598,7 +598,7 @@ bool is_jmpcall(const ZydisDecodedInstruction& instr) { // kiểm tra xem câu l
 	return jmpcall_mnemonics.contains(instr.mnemonic);
 }
 
-void obfuscatecff::instruction_t::load_relative_info() { // lấy thông tin về các giá trị tham chiếu tương đối
+void obfuscatecff::instruction_t::load_relative_info() { // get information about relative reference values
 
 	if (!(this->zyinstr.info.attributes & ZYDIS_ATTRIB_IS_RELATIVE))
 	{
@@ -654,7 +654,7 @@ void obfuscatecff::instruction_t::load_relative_info() { // lấy thông tin v�
 }
 
 
-void obfuscatecff::instruction_t::load(int funcid, std::vector<uint8_t>raw_data) { // nạp câu lệnh từ raw_data và funcid
+void obfuscatecff::instruction_t::load(int funcid, std::vector<uint8_t>raw_data) { // load instruction from raw_data and funcid
 	this->inst_id = instruction_id++;
 	ZydisDisassembleIntel(ZYDIS_MACHINE_MODE_LONG_64, (ZyanU64)raw_data.data(), (const void*)(raw_data.data()), raw_data.size(), &this->zyinstr);
 	this->func_id = funcid;
@@ -662,7 +662,7 @@ void obfuscatecff::instruction_t::load(int funcid, std::vector<uint8_t>raw_data)
 	this->load_relative_info();
 }
 
-void obfuscatecff::instruction_t::load(int funcid, ZydisDisassembledInstruction zyinstruction, uint64_t runtime_address) { // nạp câu lệnh từ zydis disassembled instruction và địa chỉ runtime
+void obfuscatecff::instruction_t::load(int funcid, ZydisDisassembledInstruction zyinstruction, uint64_t runtime_address) { // load instruction from zydis disassembled instruction and runtime address
 	this->inst_id = instruction_id++;
 	this->zyinstr = zyinstruction;
 	this->func_id = funcid;
@@ -670,20 +670,20 @@ void obfuscatecff::instruction_t::load(int funcid, ZydisDisassembledInstruction 
 	this->load_relative_info();
 }
 
-void obfuscatecff::instruction_t::reload() { // nạp lại câu lệnh từ raw_bytes, dùng khi sửa đổi raw_bytes
+void obfuscatecff::instruction_t::reload() { // reload instruction from raw_bytes, used when modifying raw_bytes
 	ZydisDisassembleIntel(ZYDIS_MACHINE_MODE_LONG_64, (ZyanU64)this->raw_bytes.data(), (const void*)this->raw_bytes.data(), this->raw_bytes.size(), &this->zyinstr);
 	this->load_relative_info();
 }
 
-void obfuscatecff::instruction_t::print() { // in ra thông tin của câu lệnh
+void obfuscatecff::instruction_t::print() { // print information of the instruction
 	char buffer[256];
 	ZydisFormatterFormatInstruction(&formatter, &this->zyinstr.info, this->zyinstr.operands, this->zyinstr.info.operand_count,
 		buffer, sizeof(buffer), runtime_address, ZYAN_NULL);
 	puts(buffer);
 }
 
-// map giữa các register và mnemonic tương ứng tring zydis
-// map giữa các register và mnemonic tương ứng tring zydis
+// map between registers and corresponding mnemonics in zydis
+// map between registers and corresponding mnemonics in zydis
 std::unordered_map<ZydisRegister_, x86::Gp> obfuscatecff::lookupmap = {
 	// 8-bit
 	REG_PAIR(AL, al), REG_PAIR(CL, cl), REG_PAIR(DL, dl), REG_PAIR(BL, bl),

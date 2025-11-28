@@ -6,7 +6,7 @@ from pathlib import Path
 obfuguard_path = r"E:\Graduation-Thesis-HUST\x64\Release\ObfuGuard.exe"
 root_dir = Path(r"E:\Graduation-Thesis-HUST\binary_test")
 
-# Thống kê
+# Statistics
 success_count = 0
 fail_count = 0
 failed_files = []
@@ -74,7 +74,7 @@ def main():
             else:
                 print(f"[!] .exe not found for {pdb_file.name} in {folder.name}, skipping.")
 
-    # Kết quả tổng hợp
+    # Summary results
     print("\n========== SUMMARY ==========")
     print(f"[+] Success count : {success_count}")
     print(f"[+] Failed count  : {fail_count}")
