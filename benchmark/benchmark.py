@@ -5,7 +5,7 @@ import angr
 import capstone
 import logging
 
-# Ẩn log để terminal sạch
+# Hide logs to keep terminal clean
 logging.getLogger("angr").setLevel(logging.CRITICAL)
 logging.getLogger("cle").setLevel(logging.CRITICAL)
 logging.getLogger("pyvex").setLevel(logging.CRITICAL)
@@ -78,7 +78,7 @@ def analyze_binary_full(path):
     project = angr.Project(path, auto_load_libs=False)
     text_sec = get_text_section(project)
     if not text_sec:
-        raise Exception("Không tìm thấy section .text")
+        raise Exception("Section .text not found")
     code = project.loader.memory.load(text_sec.vaddr, text_sec.memsize)
 
     branches, cyclomatic, total_insns = analyze_code_complexity(code, text_sec.vaddr)
@@ -147,7 +147,7 @@ def main():
         try:
             base = analyze_binary_full(orig)
         except Exception as e:
-            print(f"[!] Lỗi phân tích gốc {orig}: {e}")
+            print(f"[!] Error analyzing original {orig}: {e}")
             continue
 
         base_name, _ = os.path.splitext(orig)
@@ -158,7 +158,7 @@ def main():
             try:
                 variant = analyze_binary_full(vpath)
             except Exception as e:
-                print(f"[!] Lỗi phân tích biến thể {vpath}: {e}")
+                print(f"[!] Error analyzing variant {vpath}: {e}")
                 continue
 
             row = {
@@ -173,9 +173,9 @@ def main():
                 row[f"{m}_variant"] = round(v, 4) if isinstance(v, float) else v
                 row[f"{m}_diff(%)"] = round(percent_diff(v, b), 2)
             append_result(row)
-            print(f"[✓] Đã ghi {row['Original']} → {row['Variant']}")
+            print(f"[✓] Written {row['Original']} → {row['Variant']}")
 
-    print(f"\n✅ Ghi xong vào: {OUTPUT_CSV}")
+    print(f"\n✅ Completed writing to: {OUTPUT_CSV}")
 
 if __name__ == "__main__":
     main()

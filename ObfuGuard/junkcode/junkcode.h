@@ -9,7 +9,7 @@
 #include <set>
 #include <cstdint>
 
-// Khai báo trước
+// Forward declaration
 namespace LIEF {
     namespace PE {
         class Binary;
@@ -17,7 +17,7 @@ namespace LIEF {
     }
 }
 
-// Thêm namespace FuncToRVA forward declaration
+// Add FuncToRVA namespace forward declaration
 namespace FuncToRVA {
     struct FunctionInfo;
 }
@@ -95,7 +95,7 @@ public:
     );
 };
 
-// ============ THÊM MỚI: JunkCodeManager ============
+// ============ NEW: JunkCodeManager ============
 class JunkCodeManager {
 public:
     // Main interface methods
@@ -126,7 +126,7 @@ private:
 
     static bool is_function_blacklisted(const std::string& func_name);
 
-    // ========== THÊM MỚI: Binary size checking methods ==========
+    // ========== NEW: Binary size checking methods ==========
     static bool is_binary_large(const std::string& binary_path);
     static bool is_large_binary_function_dangerous(const std::string& func_name, const std::string& binary_path);
     static bool is_function_blacklisted_by_binary_size(const std::string& func_name, const std::string& binary_path);
@@ -135,9 +135,9 @@ private:
     static const std::set<std::string> DANGEROUS_FUNCTION_NAMES;
     static const std::vector<std::string> DANGEROUS_PREFIXES;
 
-    // ========== THAY ĐỔI: Constants cho binary size checking ==========
-    static const uint32_t LARGE_BINARY_SIZE_THRESHOLD; // Thay đổi từ LARGE_FUNCTION_SIZE_THRESHOLD
-    static const std::set<std::string> DANGEROUS_FUNCTION_NAMES_BIG_BINARY; // Thay đổi từ DANGEROUS_FUNCTION_NAMES_BIG_SIZE
+    // ========== CHANGED: Constants for binary size checking ==========
+    static const uint32_t LARGE_BINARY_SIZE_THRESHOLD; // Changed from LARGE_FUNCTION_SIZE_THRESHOLD
+    static const std::set<std::string> DANGEROUS_FUNCTION_NAMES_BIG_BINARY; // Changed from DANGEROUS_FUNCTION_NAMES_BIG_SIZE
 };
 
 #endif // JUNKCODE_H

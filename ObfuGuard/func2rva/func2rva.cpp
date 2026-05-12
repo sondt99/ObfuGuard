@@ -12,9 +12,9 @@
 #include <memory>    
 
 
-namespace FuncToRVA { // Namespace cho phân giải hàm thành RVAs
+namespace FuncToRVA { // Namespace for resolving functions to RVAs
 
-    RVAResolver::RVAResolver(const std::string& pe_path) // Hàm khởi tạo lớp RVAResolver, nhận vào đường dẫn tới file PE (EXE/DLL)
+    RVAResolver::RVAResolver(const std::string& pe_path) // Constructor of RVAResolver class, takes path to PE file (EXE/DLL)
         : pe_path_str_(pe_path),
         is_initialized_(false),
         image_base_(0),
@@ -22,9 +22,9 @@ namespace FuncToRVA { // Namespace cho phân giải hàm thành RVAs
         has_text_section_for_reference_(false) {
     }
 
-    RVAResolver::~RVAResolver() {} // Hàm hủy của lớp RVAResolver, mặc định không cần xử lý gì thêm
+    RVAResolver::~RVAResolver() {} // Destructor of RVAResolver class, no additional processing needed by default
 
-    bool RVAResolver::initialize() { // Hàm khởi tạo phân giải RVA. Nếu đã khởi tạo trước đó thì bỏ qua.
+    bool RVAResolver::initialize() { // Initialize RVA resolver. Skip if already initialized.
         if (is_initialized_) {
             return true; 
         }
@@ -32,18 +32,18 @@ namespace FuncToRVA { // Namespace cho phân giải hàm thành RVAs
         return is_initialized_;
     }
 
-    bool RVAResolver::load_pe_and_parse_pdb() { // Trích xuất hàm từ pe và pdb, tính toán RVA dựa trên offset
+    bool RVAResolver::load_pe_and_parse_pdb() { // Extract functions from PE and PDB, calculate RVA based on offset
         try {   
             pe_file_handle_ = std::make_unique<pe64>(pe_path_str_);
 
-			PIMAGE_NT_HEADERS nt_headers = pe_file_handle_->get_nt(); // Lấy NT Headers từ PE
+			PIMAGE_NT_HEADERS nt_headers = pe_file_handle_->get_nt(); // Get NT Headers from PE
             if (!nt_headers) {
                 std::cerr << "Error: Could not get NT Headers from PE file: " << pe_path_str_ << std::endl;
                 return false;
             }
             image_base_ = nt_headers->OptionalHeader.ImageBase;
 
-			PIMAGE_SECTION_HEADER text_section = pe_file_handle_->get_section(".text"); // lấy .text section
+			PIMAGE_SECTION_HEADER text_section = pe_file_handle_->get_section(".text"); // Get .text section
             if (text_section) {
                 text_section_rva_ = text_section->VirtualAddress;
                 has_text_section_for_reference_ = true;
@@ -51,7 +51,7 @@ namespace FuncToRVA { // Namespace cho phân giải hàm thành RVAs
             else {
                 std::cerr << "Warning: Could not find '.text' section in file " << pe_path_str_
                     << ". RVA calculations may be affected." << std::endl;
-                // Dựa trên func2rva.cpp, giả định rằng offset từ PDB được cộng thêm vào địa chỉ RVA của đoạn .text
+                // Based on func2rva.cpp, assume that offset from PDB is added to the RVA address of .text section
             }
 
             pdb_parser_handle_ = std::make_unique<pdbparser>(pe_file_handle_.get());
@@ -89,7 +89,7 @@ namespace FuncToRVA { // Namespace cho phân giải hàm thành RVAs
         }
     }
 
-	// Trả về danh sách các hàm đã phân giải. Nếu chưa khởi tạo, trả về danh sách rỗng và thông báo lỗi.
+	// Return list of resolved functions. If not initialized, return empty list and report error.
     const std::vector<FunctionInfo>& RVAResolver::get_functions_info() const {
         if (!is_initialized_) {
             static std::vector<FunctionInfo> empty_list; 
@@ -99,7 +99,7 @@ namespace FuncToRVA { // Namespace cho phân giải hàm thành RVAs
         return resolved_functions_list_;
     }
 
-	// Hiển thị danh sách các hàm, cho người dùng chọn một hàm để lấy RVA
+	// Display list of functions, let user select one function to get RVA
     bool RVAResolver::select_function_rva_interactive(uint32_t& out_rva) {
         if (!is_initialized_) {
             std::cerr << "Error: RVAResolver has not been initialized. Please call initialize() first." << std::endl;
@@ -174,7 +174,7 @@ namespace FuncToRVA { // Namespace cho phân giải hàm thành RVAs
         }
     }
 
-    // Hàm tiện ích cho phép chọn một hàm từ PE và gọi nội bộ RVAResolver thực hiện chọn hàm
+    // Utility function that allows selecting a function from PE and internally calls RVAResolver to perform function selection
     bool get_rva_by_interactive_selection(const std::string& pe_file_path, uint32_t& selected_rva) {
         RVAResolver resolver(pe_file_path);
         if (!resolver.initialize()) {
@@ -184,7 +184,7 @@ namespace FuncToRVA { // Namespace cho phân giải hàm thành RVAs
         return resolver.select_function_rva_interactive(selected_rva);
     }
 
-    // Cho phép chọn nhiều hàm từ list
+    // Allow selecting multiple functions from list
     bool RVAResolver::select_multiple_functions_rva_interactive(std::vector<uint32_t>& out_rvas, std::vector<std::string>& out_names) {
         if (!is_initialized_) {
             std::cerr << "Error: RVAResolver has not been initialized. Please call initialize() first." << std::endl;
@@ -307,7 +307,7 @@ namespace FuncToRVA { // Namespace cho phân giải hàm thành RVAs
         }
     }
 
-    // Hàm tiện ích chọn nhiều hàm --> danh sách RVA và tên hàm
+    // Utility function for selecting multiple functions --> RVA list and function names
     bool get_multiple_rvas_by_interactive_selection(const std::string& pe_file_path,
         std::vector<uint32_t>& selected_rvas,
         std::vector<std::string>& selected_names) {

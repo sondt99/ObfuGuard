@@ -6,7 +6,7 @@
 
 class pdbparser {
 private:
-	// Chứa thông tin về signature, về tên tệp PDB của tệp đầu vào
+	// Contains signature and PDB file name information of the input file
 	struct codeviewInfo_t
 	{
 		ULONG CvSignature;
@@ -15,11 +15,11 @@ private:
 		char PdbFileName[ANYSIZE_ARRAY];
 	};
 
-	uint8_t* module_base = nullptr; // Lưu trữ địa chỉ cơ sở của PDB sau khi được tải vào bộ nhớ
+	uint8_t* module_base = nullptr; // Store base address of PDB after loading into memory
 
 public:
 
-	struct sym_func { // Lưu trữ thông tin cơ bản của hàm
+	struct sym_func { // Store basic function information
 
 		int id = -1;
 

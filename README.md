@@ -11,7 +11,7 @@ vcpkg install asmjit:x64-windows
 vcpkg install zydis:x64-windows
 ```
 
-- File Pe và file pdb của chương trình cần obfuscate.
+- PE file and PDB file of the program to be obfuscated.
 
 
 ## Control Flow Flattening
@@ -19,11 +19,11 @@ vcpkg install zydis:x64-windows
 
 ### Technique
 
-- Duyệt qua tất cả các câu lệnh của hàm để tạo các block. Các block được xây dựng bắt đầu từ các điểm đích từ các lệnh conditional jump. Kết thúc của các block sẽ là các điểm kết thúc tự nhiên: hoặc là một lệnh jump và không call hàm, hoặc là 1 lệnh ret, hoặc là 1 điểm đích từ các lệnh conditional jump.
+- Traverse all instructions of the function to create blocks. Blocks are built starting from destination points of conditional jump instructions. The end of blocks will be natural termination points: either a jump instruction that is not a function call, or a ret instruction, or a destination point from conditional jump instructions.
 
-- Duyệt qua tất cả các block, câu lệnh cuối của block là lệnh conditional jump thì đặt vị trí của khối mà lệnh conditional jump kia nhảy tới vào block_dst. Đặt attribute next_block của block hiện tại bằng current_block_id+1.
+- Traverse all blocks, if the last instruction of a block is a conditional jump, set the position of the block that the conditional jump jumps to in block_dst. Set the next_block attribute of the current block to current_block_id+1.
 
-- Shuffle vector chứa các block. Sử dụng rax là biến trạng thái để chuyển luồng qua dispatcher và tạo cấu trúc điều khiển thực hiện làm phẳng luồng.
+- Shuffle the vector containing the blocks. Use rax as a state variable to transfer flow through dispatcher and create control structure to perform flow flattening.
 
 
 ### PoC
@@ -31,19 +31,19 @@ vcpkg install zydis:x64-windows
 
 ![before cff](/PoC/cff/before.png)
 
-- Trước khi được làm phẳng, hàm có cấu trúc luồng cơ bản như trên: A->B or C -> D. Mục tiêu của việc làm phẳng luồng này là tạo ra cấu trúc điều khiển chuyển luồng giữa các block A,B,C,D thông qua dispatcher thay vì các thực thi luồng tuyến tính như ban đầu mà hiệu quả không đổi. Mục tiêu cần đạt được cần như sau:
+- Before flattening, the function has basic flow structure as above: A->B or C -> D. The goal of this flow flattening is to create a control structure that transfers flow between blocks A,B,C,D through dispatcher instead of the original linear flow execution with unchanged effectiveness. The target to be achieved is as follows:
 
 ![target](/PoC/cff/target.png)
 
-- Sau khi thực hiện làm phẳng luồng, tải toàn bộ file pe thu được vào phần mềm  IDA để kiểm tra kết quả.
+- After performing flow flattening, load the entire obtained PE file into IDA software to check the results.
 
 ![CFG after flattening](/PoC/cff/CFG_after.png)
 
 
-- Dựa vào Control-flow graph thu được, cấu trúc của chương trình đã bị biến đổi thông qua biến trạng thái là thanh ghi rax, và chuyển đổi luồng liên tục thông qua các lệnh `cmp eax,0`, `cmp eax,2`, `cmp eax,3`, `cmp eax,1`. Truy vết theo các luồng ứng với eax thì dẫn đến các đoạn block A, block B, Block C, Block D như mong đợi.
+- Based on the obtained Control-flow graph, the program structure has been transformed through the state variable which is the rax register, and continuously transfers flow through instructions `cmp eax,0`, `cmp eax,2`, `cmp eax,3`, `cmp eax,1`. Tracing the flows corresponding to eax leads to block A, block B, Block C, Block D as expected.
 
 
-- Tiếp tục kiểm chứng hiệu quả chương trình thông qua mã pseudocode thu được khi decompile:
+- Continue to verify the program effectiveness through the pseudocode obtained when decompiling:
 
 ```C
 __int64 __fastcall sub_1400292F5(char a1)
@@ -105,7 +105,7 @@ __int64 __fastcall sub_1400292F5(char a1)
 }
 ```
  
-- Dựa vào pseudocode thu được, cấu trúc của chương trình cũng dễ dàng nhận thấy sự thay đổi. Với biến trạng thái v8 (biểu thị của rax), các câu lệnh if kiểm tra các giá trị của biến trạng thái để chuyển luồng vào block A, sub_1400112c1 (), sub_140011217() và return. Khi truy vết theo luồng này thì thu được kết quả là cấu trúc này của chương trình thực hiện chuyển luồng qua biến v8 tới các block A, block B, block C, block D như mong đợi.
+- Based on the obtained pseudocode, the program structure also easily shows changes. With the state variable v8 (representing rax), the if statements check the values of the state variable to transfer flow into block A, sub_1400112c1 (), sub_140011217() and return. When tracing along this flow, the result shows that this program structure performs flow transfer through variable v8 to blocks A, block B, block C, block D as expected.
 
 
 
@@ -114,31 +114,31 @@ __int64 __fastcall sub_1400292F5(char a1)
 ## Junk Code Injection
 ### Techique
 
-- Background technique - Trampoline:  kỹ thuật trampoline thực hiện thay đổi luồng chương trình qua các hàm nhảy gián tiếp đến phần mã nguồn cần thực thi.
+- Background technique - Trampoline: trampoline technique performs changing program flow through indirect jumping functions to the source code part that needs to be executed.
 
-- Trước tiên để có thể tạo không gian chèn các câu lệnh rác, chương trình sẽ sử dung kỹ thuật trampoline để relocate hàm gốc của hàm được lựa chọn sang một section mới được tạo ra để thực hiện chèn junk code. Relocating hàm gốc sang section mới sẽ cho chương trình can thiệp nhiều hơn vào chèn vào các hàm mà không gây ảnh hưởng đến cấu trúc phần còn lại của binary.
+- First, to create space for inserting junk instructions, the program will use trampoline technique to relocate the original function of the selected function to a newly created section to perform junk code insertion. Relocating the original function to a new section will allow the program to intervene more in inserting into functions without affecting the structure of the remaining parts of the binary.
 
-- Chương trình tạo một section mới trống làm vùng nhớ mà hàm cần obfuscating sẽ được relocate đến. Đọc tất cả các câu lệnh trong hàm được chọn vào buffer; biến vùng nhớ hàm được chọn ban đầu trở thành một hàm nhảy gián tiếp đến đầu vùng section mới được tạo (trampoline technique).
+- The program creates a new empty section as memory area where the function to be obfuscated will be relocated to. Read all instructions in the selected function into buffer; turn the memory area of the initially selected function into an indirect jump function to the beginning of the newly created section area (trampoline technique).
 
-- Chương trình duyệt qua buffer và thực viết ghi mã từ buffer vào section mới được tạo. Cứ mỗi một instruction từ buffer được ghi vào thì theo sau đó sẽ ghi một hoặc một vài lệnh junk code được dinh random từ bộ junk code của chương trình. Khi kết thúc thì hàm ban đầu đã được chèn xen giữa các đoạn junk code.
+- The program traverses the buffer and writes code from the buffer into the newly created section. For each instruction written from the buffer, one or more junk code instructions randomly selected from the program's junk code collection are written after it. When finished, the original function has been inserted between junk code segments.
 
 
 ### PoC
 
 ![before junkcode](PoC/junkcode/junkcode_before.png)
 
-- Trước khi thực hiện chèn lệnh rác, binary của hàm nằm ở rva 0x12380. Tất cả các câu lệnh của hàm đều rất rõ ràng và liền mạch nhau về mặt logic. Mục tiêu của việc chèn junk code là hàm sau khi được chèn junk code sẽ bị chèn thêm các lệnh rác vào xem giữa các câu lệnh của binary ban đầu. Các câu lệnh này làm tăng độ khó trong việc dịch ngược mã phần mềm nhưng lại hoàn toàn vô hại với logic chung của chương trình
+- Before performing junk code insertion, the function binary is located at RVA 0x12380. All instructions of the function are very clear and logically continuous. The goal of junk code insertion is that after inserting junk code, the function will have junk instructions inserted between the original binary instructions. These instructions increase the difficulty of software reverse engineering but are completely harmless to the overall program logic.
 
-- Sau khi thực hiện chèn junk code, load pe thu được vào phần mềm IDA để kiểm chứng hiệu quả:
+- After performing junk code insertion, load the obtained PE into IDA software to verify effectiveness:
 
 
 ![origin_rva_after](PoC/junkcode/origin_rva_after.png)
 
-- Tại rva ban đầu của hàm được chọn, có thể thấy rằng đoạn mã trong hàm chỉ đơn giản là một câu lệnh nhảy đến section mới. Tất cả phần còn lại của hàm được patch bằng lệnh nop theo đúng kỹ thuật trampoline. Truy vết theo lệnh jmp này có thể thấy đoạn mã gốc của hàm đã được relocate thành công đến vùng section mới đúng như kỹ thuật trampoline.
+- At the original RVA of the selected function, it can be seen that the code segment in the function is simply a jump instruction to the new section. All remaining parts of the function are patched with nop instructions according to the trampoline technique. Tracing this jmp instruction shows that the original function code has been successfully relocated to the new section area exactly as the trampoline technique.
 
 ![binary after](PoC/junkcode/binary_after.png)
 
-- Tại vùng section được hàm ban đầu relocate đến, có thể nhận thấy rằng binary của hàm ban đầu đã bị chèn giữa bởi rất nhiều các câu lệnh rác không ảnh hưởng đến logic chung của chương trình như `mov rdx, rdx`, `lea rbx, rbx`,... Những câu lệnh này không hề ảnh hưởng đến logic chương trình nhưng gây rối đoạn mã binary đối với người phân tích. Hiệu quả obusfacting của file thu được đúng như mong đợi.
+- At the section area where the original function was relocated to, it can be seen that the binary of the original function has been inserted between many junk instructions that do not affect the overall program logic such as `mov rdx, rdx`, `lea rbx, rbx`,... These instructions do not affect program logic but confuse the binary code for analysts. The obfuscating effectiveness of the obtained file is as expected.
 
 
 
