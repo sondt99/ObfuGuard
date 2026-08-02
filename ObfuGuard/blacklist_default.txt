@@ -1,0 +1,72 @@
+# Blacklisted function names for junk code injection.
+# Functions listed here will be excluded from trampoline injection
+# because they are critical runtime/CRT functions whose modification
+# would break program execution.
+#
+# Format: one function name per line. Lines starting with '#' are comments.
+# Blank lines are ignored.
+
+mainCRTStartup
+atexit
+__scrt_initialize_onexit_tables
+__scrt_dllmain_before_initialize
+_initterm
+_initterm_e
+__C_specific_handler
+_chkstk
+__security_check_cookie
+__GSHandlerCheck
+__isa_available_init
+pre_c_initialization
+DebuggerRuntime
+pre_cpp_initialization
+operator new
+operator delete
+failwithmessage
+exit
+fget
+fwrite
+memcpy
+memmove
+memset
+malloc
+free
+fread
+fclose
+fopen
+fprintf
+printf
+sprintf
+snprintf
+strcpy
+strncpy
+strcat
+strncat
+strlen
+strcmp
+strncmp
+fgetc
+fgets
+fputc
+fputs
+vfprintf
+vprintf
+vsprintf
+fgetpos
+fsetpos
+fegetenv
+srand
+rand
+time
+localtime
+gmtime
+asctime
+ctime
+clock
+ceil
+wcsnlen
+strpbrk
+GetLocaleNameFromLanguage
+strcspn
+memcmp
+qsort

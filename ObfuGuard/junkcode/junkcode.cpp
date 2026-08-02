@@ -1,4 +1,5 @@
 ﻿#include "junkcode.h"
+#include "../constants.h"
 
 #include <iostream>
 #include <fstream>
@@ -7,11 +8,8 @@
 #include <iomanip>
 #include <memory>
 #include <algorithm>
-#include <cstdlib>
-#include <ctime>
 #include <sstream>
 #include <set>
-#define NOMINMAX
 #include <filesystem>
 
 #include <LIEF/LIEF.hpp>
@@ -21,9 +19,7 @@
 #include "../func2rva/func2rva.h"
 
 // Constructor/Destructor
-TrampolineInjector::TrampolineInjector() : binary(nullptr), image_base(0), is_64_bit(false) {
-    // Set initial variables and seed for random
-    srand(static_cast<unsigned int>(time(nullptr)));
+TrampolineInjector::TrampolineInjector() : image_base(0), is_64_bit(false), rng_(std::random_device{}()) {
 }
 
 TrampolineInjector::~TrampolineInjector() {
@@ -48,34 +44,29 @@ bool TrampolineInjector::load_pe(const std::string& pe_path) {
         return false;
     }
 
-    binary = binary_ptr.get();
-    image_base = binary->imagebase();
+    image_base = binary_ptr->imagebase();
 
-    is_64_bit = (binary->header().machine() == LIEF::PE::Header::MACHINE_TYPES::AMD64);
+    is_64_bit = (binary_ptr->header().machine() == LIEF::PE::Header::MACHINE_TYPES::AMD64);
 
     return true;
 }
 
 // Get current number of sections in PE
 uint32_t TrampolineInjector::get_current_section_count() const {
-    if (!binary) {
+    if (!binary_ptr) {
         return 0;
     }
-    return static_cast<uint32_t>(binary->sections().size());
+    return static_cast<uint32_t>(binary_ptr->sections().size());
 }
 
 // Calculate maximum number of functions that can be injected based on section limit
 uint32_t TrampolineInjector::calculate_max_injectable_functions() const {
-    if (!binary) {
+    if (!binary_ptr) {
         return 0;
     }
 
-    const uint32_t PE_MAX_SECTIONS = 96;
-    const uint32_t SAFETY_MARGIN = 10;
-    const uint32_t RESERVED_FOR_SYSTEM = 5;
-
     uint32_t current_sections = get_current_section_count();
-    uint32_t max_usable_sections = PE_MAX_SECTIONS - SAFETY_MARGIN - RESERVED_FOR_SYSTEM;
+    uint32_t max_usable_sections = ObfuGuard::PE_MAX_SECTIONS - ObfuGuard::PE_SECTION_SAFETY_MARGIN - ObfuGuard::PE_RESERVED_SYSTEM_SECTIONS;
 
     if (current_sections >= max_usable_sections) {
         return 0; // Cannot inject any more functions if limit is reached
@@ -115,7 +106,7 @@ bool TrampolineInjector::get_and_relocate_original_function_code(
 
     // Check if the VA address is valid
     /*std::cout << "Info: Searching for section containing VA 0x" << std::hex << original_func_va << std::dec << std::endl;*/
-    for (const LIEF::PE::Section& sec : binary->sections()) {
+    for (const LIEF::PE::Section& sec : binary_ptr->sections()) {
         uint64_t sec_va_start = image_base + sec.virtual_address();
         uint64_t sec_va_end = sec_va_start + sec.virtual_size();
         if (original_func_va >= sec_va_start && original_func_va < sec_va_end) {
@@ -154,7 +145,7 @@ bool TrampolineInjector::get_and_relocate_original_function_code(
     }
 
     // Read raw bytes from original function's virtual address in PE file
-    LIEF::span<const uint8_t> function_raw_bytes_span = binary->get_content_from_virtual_address(original_func_va, static_cast<uint32_t>(max_read_size));
+    LIEF::span<const uint8_t> function_raw_bytes_span = binary_ptr->get_content_from_virtual_address(original_func_va, static_cast<uint32_t>(max_read_size));
     if (function_raw_bytes_span.empty()) {
         std::cerr << "Error: Could not read content from original function VA: 0x" << std::hex << original_func_va << std::endl;
         return false;
@@ -320,7 +311,7 @@ bool TrampolineInjector::create_new_section(const std::string& section_name, uin
     new_section_obj.virtual_size(initial_size);
     new_section_obj.size(0);
 
-    LIEF::PE::Section* new_section_ptr = binary->add_section(new_section_obj);
+    LIEF::PE::Section* new_section_ptr = binary_ptr->add_section(new_section_obj);
     return (new_section_ptr != nullptr);
 }
 
@@ -428,7 +419,7 @@ std::string TrampolineInjector::get_random_junk_instruction() {
     };
 
     const auto& pool = is_64_bit ? junk_64bit : junk_32bit;
-    return pool[rand() % pool.size()];
+    return pool[std::uniform_int_distribution<size_t>(0, pool.size() - 1)(rng_)];
 }
 
 // Fill remaining memory space with NOPs (no-operation)
@@ -437,63 +428,63 @@ void TrampolineInjector::fill_remaining_space_with_nops(uint64_t address, size_t
         if (size >= 9) {
             // 9-byte NOP: 66 0F 1F 84 00 00 00 00 00
             std::vector<uint8_t> nop_9 = { 0x66, 0x0F, 0x1F, 0x84, 0x00, 0x00, 0x00, 0x00, 0x00 };
-            binary->patch_address(address, nop_9);
+            binary_ptr->patch_address(address, nop_9);
             address += 9;
             size -= 9;
         }
         else if (size >= 8) {
             // 8-byte NOP: 0F 1F 84 00 00 00 00 00
             std::vector<uint8_t> nop_8 = { 0x0F, 0x1F, 0x84, 0x00, 0x00, 0x00, 0x00, 0x00 };
-            binary->patch_address(address, nop_8);
+            binary_ptr->patch_address(address, nop_8);
             address += 8;
             size -= 8;
         }
         else if (size >= 7) {
             // 7-byte NOP: 0F 1F 80 00 00 00 00
             std::vector<uint8_t> nop_7 = { 0x0F, 0x1F, 0x80, 0x00, 0x00, 0x00, 0x00 };
-            binary->patch_address(address, nop_7);
+            binary_ptr->patch_address(address, nop_7);
             address += 7;
             size -= 7;
         }
         else if (size >= 6) {
             // 6-byte NOP: 66 0F 1F 44 00 00
             std::vector<uint8_t> nop_6 = { 0x66, 0x0F, 0x1F, 0x44, 0x00, 0x00 };
-            binary->patch_address(address, nop_6);
+            binary_ptr->patch_address(address, nop_6);
             address += 6;
             size -= 6;
         }
         else if (size >= 5) {
             // 5-byte NOP: 0F 1F 44 00 00
             std::vector<uint8_t> nop_5 = { 0x0F, 0x1F, 0x44, 0x00, 0x00 };
-            binary->patch_address(address, nop_5);
+            binary_ptr->patch_address(address, nop_5);
             address += 5;
             size -= 5;
         }
         else if (size >= 4) {
             // 4-byte NOP: 0F 1F 40 00
             std::vector<uint8_t> nop_4 = { 0x0F, 0x1F, 0x40, 0x00 };
-            binary->patch_address(address, nop_4);
+            binary_ptr->patch_address(address, nop_4);
             address += 4;
             size -= 4;
         }
         else if (size >= 3) {
             // 3-byte NOP: 0F 1F 00
             std::vector<uint8_t> nop_3 = { 0x0F, 0x1F, 0x00 };
-            binary->patch_address(address, nop_3);
+            binary_ptr->patch_address(address, nop_3);
             address += 3;
             size -= 3;
         }
         else if (size >= 2) {
             // 2-byte NOP: 66 90
             std::vector<uint8_t> nop_2 = { 0x66, 0x90 };
-            binary->patch_address(address, nop_2);
+            binary_ptr->patch_address(address, nop_2);
             address += 2;
             size -= 2;
         }
         else {
             // 1-byte NOP: 90
             std::vector<uint8_t> nop_1 = { 0x90 };
-            binary->patch_address(address, nop_1);
+            binary_ptr->patch_address(address, nop_1);
             address += 1;
             size -= 1;
         }
@@ -530,7 +521,7 @@ size_t TrampolineInjector::patch_junk_region(ks_engine* ks, uint64_t start_addre
                 }
 
                 std::vector<uint8_t> junk_bytes(junk_encode, junk_encode + junk_asm_size);
-                binary->patch_address(current_address, junk_bytes);
+                binary_ptr->patch_address(current_address, junk_bytes);
 
                 current_address += junk_asm_size;
                 remaining -= junk_asm_size;
@@ -575,7 +566,7 @@ bool TrampolineInjector::create_trampoline(uint64_t original_func_va, uint64_t n
 
     try {
         // 1. Find section containing original function by looping through sections
-        for (const LIEF::PE::Section& sec : binary->sections()) {
+        for (const LIEF::PE::Section& sec : binary_ptr->sections()) {
             uint64_t sec_va_start = image_base + sec.virtual_address();
             uint64_t sec_va_end = sec_va_start + sec.virtual_size();
             if (original_func_va >= sec_va_start && original_func_va < sec_va_end) {
@@ -637,7 +628,7 @@ bool TrampolineInjector::create_trampoline(uint64_t original_func_va, uint64_t n
 
     size_t junk_before_size = min_junk_before;
     if (max_junk_before > min_junk_before) {
-        junk_before_size = min_junk_before + (rand() % (max_junk_before - min_junk_before + 1));
+        junk_before_size = min_junk_before + std::uniform_int_distribution<size_t>(0, max_junk_before - min_junk_before)(rng_);
     }
 
     // JMP instruction will be placed at this VA
@@ -696,7 +687,7 @@ bool TrampolineInjector::create_trampoline(uint64_t original_func_va, uint64_t n
             return false;
         }
 
-        binary->patch_address(current_address, jmp_bytes);
+        binary_ptr->patch_address(current_address, jmp_bytes);
         current_address += jmp_size;
 
         // Patch junk code after JMP instruction
@@ -738,7 +729,7 @@ bool TrampolineInjector::inject_function_trampoline(uint32_t function_rva) {
 
     // Find newly created section
     LIEF::PE::Section* new_section_ptr = nullptr;
-    for (LIEF::PE::Section& sec : binary->sections()) {
+    for (LIEF::PE::Section& sec : binary_ptr->sections()) {
         if (sec.name() == ".injcod") {
             new_section_ptr = &sec;
             break;
@@ -751,10 +742,10 @@ bool TrampolineInjector::inject_function_trampoline(uint32_t function_rva) {
     }
 
     // Update new section content first
-    uint32_t file_alignment = binary->optional_header().file_alignment();
+    uint32_t file_alignment = binary_ptr->optional_header().file_alignment();
     if (file_alignment == 0) file_alignment = 0x200;
 
-    uint32_t section_alignment = binary->optional_header().section_alignment();
+    uint32_t section_alignment = binary_ptr->optional_header().section_alignment();
     if (section_alignment == 0) section_alignment = 0x1000;
 
     size_t final_raw_size = ((relocated_code_bytes.size() + file_alignment - 1) / file_alignment) * file_alignment;
@@ -767,7 +758,7 @@ bool TrampolineInjector::inject_function_trampoline(uint32_t function_rva) {
     new_section_ptr->content(relocated_code_bytes);
 
     // Rebuild binary layout
-    LIEF::PE::Builder temp_builder(*binary);
+    LIEF::PE::Builder temp_builder(*binary_ptr);
     temp_builder.build_imports(false);
     temp_builder.patch_imports(false);
     try {
@@ -877,7 +868,7 @@ bool TrampolineInjector::inject_multiple_function_trampolines(const std::vector<
 
         // Find newly created section
         LIEF::PE::Section* new_section_ptr = nullptr;
-        for (LIEF::PE::Section& sec : binary->sections()) {
+        for (LIEF::PE::Section& sec : binary_ptr->sections()) {
             if (sec.name() == section_name) {
                 new_section_ptr = &sec;
                 break;
@@ -890,10 +881,10 @@ bool TrampolineInjector::inject_multiple_function_trampolines(const std::vector<
         }
 
         // Update section content
-        uint32_t file_alignment = binary->optional_header().file_alignment();
+        uint32_t file_alignment = binary_ptr->optional_header().file_alignment();
         if (file_alignment == 0) file_alignment = 0x200;
 
-        uint32_t section_alignment = binary->optional_header().section_alignment();
+        uint32_t section_alignment = binary_ptr->optional_header().section_alignment();
         if (section_alignment == 0) section_alignment = 0x1000;
 
         size_t final_raw_size = ((relocated_code_bytes.size() + file_alignment - 1) / file_alignment) * file_alignment;
@@ -906,7 +897,7 @@ bool TrampolineInjector::inject_multiple_function_trampolines(const std::vector<
         new_section_ptr->content(relocated_code_bytes);
 
         // Build finalize layout
-        LIEF::PE::Builder temp_builder(*binary);
+        LIEF::PE::Builder temp_builder(*binary_ptr);
         temp_builder.build_imports(false);
         temp_builder.patch_imports(false);
         try {
@@ -1000,8 +991,7 @@ bool TrampolineInjector::inject_trampoline_to_multiple_functions(
     const std::string& input_pe_path,
     const std::string& output_pe_path,
     const std::vector<uint32_t>& function_rvas,
-    const std::vector<std::string>& function_names,
-    bool force_64_bit)
+    const std::vector<std::string>& function_names)
 {
     TrampolineInjector injector;
 
@@ -1415,7 +1405,7 @@ int JunkCodeManager::run_auto_injection_mode(const std::string& input_pe_path,
         uint32_t actual_injected_count = 0;
         bool result = TrampolineInjector::inject_trampoline_to_multiple_functions_smart(
             input_pe_path, output_pe_path, function_rvas, function_names,
-            actual_injected_count, is_64_bit);
+            actual_injected_count);
 
         if (!result) {
             std::cerr << "Smart Auto-injection failed!\n";
@@ -1489,7 +1479,7 @@ int JunkCodeManager::run_manual_injection_mode(const std::string& input_pe_path,
             uint32_t actual_injected_count = 0;
             bool result = TrampolineInjector::inject_trampoline_to_multiple_functions_smart(
                 input_pe_path, output_pe_path, function_rvas, function_names,
-                actual_injected_count, is_64_bit);
+                actual_injected_count);
 
             if (!result) {
                 std::cerr << "Smart Manual Injection failed!\n";
@@ -1502,7 +1492,7 @@ int JunkCodeManager::run_manual_injection_mode(const std::string& input_pe_path,
         else {
             // Normal injection - acceptable limit
             bool result = TrampolineInjector::inject_trampoline_to_multiple_functions(
-                input_pe_path, output_pe_path, function_rvas, function_names, is_64_bit);
+                input_pe_path, output_pe_path, function_rvas, function_names);
 
             if (!result) {
                 std::cerr << "Manual Functions Injection failed!\n";
@@ -1528,8 +1518,7 @@ bool TrampolineInjector::inject_trampoline_to_multiple_functions_smart(
     const std::string& output_pe_path,
     const std::vector<uint32_t>& function_rvas,
     const std::vector<std::string>& function_names,
-    uint32_t& actual_injected_count,
-    bool force_64_bit)
+    uint32_t& actual_injected_count)
 {
     TrampolineInjector injector;
 
@@ -1546,7 +1535,7 @@ bool TrampolineInjector::inject_trampoline_to_multiple_functions_smart(
 
 bool TrampolineInjector::save_pe(const std::string& output_path) {
     /*std::cout << "Building and writing modified PE..." << std::endl;*/
-    LIEF::PE::Builder builder(*binary);
+    LIEF::PE::Builder builder(*binary_ptr);
 
     try {
         builder.build();
@@ -1564,8 +1553,7 @@ bool TrampolineInjector::save_pe(const std::string& output_path) {
 bool TrampolineInjector::inject_trampoline_to_function(
     const std::string& input_pe_path,
     const std::string& output_pe_path,
-    uint32_t function_rva,
-    bool force_64_bit)
+    uint32_t function_rva)
 {
     TrampolineInjector injector;
 

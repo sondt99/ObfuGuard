@@ -25,16 +25,16 @@ namespace FuncToRVA {
         ~RVAResolver();
 
         // Initialize: load PE file and parse PDB. Returns true on success, false on failure.
-        bool initialize();
+        [[nodiscard]] bool initialize();
 
         // Returns list of resolved functions (name, RVA, PDB offset, size). Only call after successful initialize().
         const std::vector<FunctionInfo>& get_functions_info() const;
 
         // Display list of functions and allow user to select one function.
-        bool select_function_rva_interactive(uint32_t& out_rva);
+        [[nodiscard]] bool select_function_rva_interactive(uint32_t& out_rva);
 
         // Display list of functions and allow user to select multiple functions.
-        bool select_multiple_functions_rva_interactive(std::vector<uint32_t>& out_rvas, std::vector<std::string>& out_names);
+        [[nodiscard]] bool select_multiple_functions_rva_interactive(std::vector<uint32_t>& out_rvas, std::vector<std::string>& out_names);
 
     private:
         std::string pe_path_str_;                       

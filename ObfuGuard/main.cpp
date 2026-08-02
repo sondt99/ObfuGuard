@@ -15,6 +15,7 @@
 #include "obfuscatecff/obfuscatecff.h"
 #include "junkcode/junkcode.h"
 #include "func2rva/func2rva.h"
+#include "constants.h"
 
 void print_banner() {
     std::cout << "========================================\n";
@@ -27,7 +28,7 @@ void print_menu() {
     std::cout << "Enter your choice (0-2): ";
 }
 
-bool get_file_input(const std::string& prompt, std::string& file_path) {
+[[nodiscard]] bool get_file_input(const std::string& prompt, std::string& file_path) {
     std::cout << prompt;
     if (!std::getline(std::cin, file_path)) {
         std::cerr << "Error: Failed to read input.\n";
@@ -48,7 +49,7 @@ bool get_file_input(const std::string& prompt, std::string& file_path) {
     return true;
 }
 
-bool detect_pe_architecture(const std::string& file_path, bool& is_64_bit) {
+[[nodiscard]] bool detect_pe_architecture(const std::string& file_path, bool& is_64_bit) {
     std::ifstream pe_file(file_path, std::ios::binary);
     if (!pe_file.is_open()) {
         std::cerr << "Error [DetectPE]: Could not open file: " << file_path << std::endl;
@@ -114,7 +115,7 @@ bool detect_pe_architecture(const std::string& file_path, bool& is_64_bit) {
     }
 }
 
-bool get_valid_pe_file_path(const std::string& prompt, std::string& path, bool& is_64_bit) {
+[[nodiscard]] bool get_valid_pe_file_path(const std::string& prompt, std::string& path, bool& is_64_bit) {
     if (!get_file_input(prompt, path)) return false;
     if (!detect_pe_architecture(path, is_64_bit)) {
         std::cerr << "Failed to determine PE architecture for " << path << ".\n";
@@ -166,8 +167,8 @@ int mode_control_flow_flattening() {
             std::cout << "Successfully analyzed all functions." << std::endl;
         }
 
-        std::cout << "Creating new section .0Cff" << std::endl;
-        auto new_section = pe.create_section(".0Cff", 10000000, IMAGE_SCN_MEM_EXECUTE | IMAGE_SCN_MEM_READ | IMAGE_SCN_CNT_CODE);
+        std::cout << "Creating new section " << ObfuGuard::CFF_SECTION_NAME << std::endl;
+        auto new_section = pe.create_section(ObfuGuard::CFF_SECTION_NAME, ObfuGuard::CFF_SECTION_SIZE, IMAGE_SCN_MEM_EXECUTE | IMAGE_SCN_MEM_READ | IMAGE_SCN_CNT_CODE);
 
         obfuscatecff obf(&pe);
         obf.create_functions(functions);

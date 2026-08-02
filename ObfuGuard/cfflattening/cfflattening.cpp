@@ -1,6 +1,18 @@
 ﻿#include "cfflattening.h"
+#include <cstdint>
 #include <random>
 #include <vector>
+
+namespace x86_opcodes {
+    const std::vector<uint8_t> PUSH_RAX = { 0x50 };
+    const std::vector<uint8_t> POP_RAX = { 0x58 };
+    const std::vector<uint8_t> PUSHF = { 0x66, 0x9C };
+    const std::vector<uint8_t> POPF = { 0x66, 0x9D };
+    const std::vector<uint8_t> MOV_EAX_IMM32 = { 0xB8, 0x00, 0x00, 0x00, 0x00 };
+    const std::vector<uint8_t> CMP_EAX_IMM32 = { 0x3D, 0x00, 0x00, 0x00, 0x00 };
+    const std::vector<uint8_t> JNE_REL8 = { 0x75, 0x08 };
+    const std::vector<uint8_t> JMP_REL32 = { 0xE9, 0x00, 0x00, 0x00, 0x00 };
+}
 
 //detect conditional jump instructions
 bool is_jmp_conditional(const ZydisDecodedInstruction& instr) {
@@ -109,27 +121,27 @@ bool obfuscatecff::apply_control_flow_flattening(std::vector<obfuscatecff::funct
 	std::shuffle(blocks.begin(), blocks.end(), rng);
 
 	// perform flow restructuring with dispatcher through comparison with rax state variable
-	instruction_t push_rax{}; push_rax.load(func->func_id, { 0x50 });
+	instruction_t push_rax{}; push_rax.load(func->func_id, x86_opcodes::PUSH_RAX);
 	push_rax.inst_id = first_inst_id;
 	push_rax.is_first_instruction = true;
 	auto it = func->instructions.insert(func->instructions.begin(), push_rax);
-	instruction_t push_f{}; push_f.load(func->func_id, { 0x66, 0x9C });
+	instruction_t push_f{}; push_f.load(func->func_id, x86_opcodes::PUSHF);
 	it = func->instructions.insert(it + 1, push_f);
-	instruction_t mov_eax_0{}; mov_eax_0.load(func->func_id, { 0xB8, 0x00,0x00,0x00,0x00 });
+	instruction_t mov_eax_0{}; mov_eax_0.load(func->func_id, x86_opcodes::MOV_EAX_IMM32);
 	it = func->instructions.insert(it + 1, mov_eax_0);
 
 	for (auto current_block = blocks.begin(); current_block != blocks.end(); current_block++) {
 
-		instruction_t cmp_eax{}; cmp_eax.load(func->func_id, { 0x3D, 0x00, 0x00,0x00,0x00 });
+		instruction_t cmp_eax{}; cmp_eax.load(func->func_id, x86_opcodes::CMP_EAX_IMM32);
 		*(uint32_t*)&cmp_eax.raw_bytes.data()[1] = current_block->block_id;
 
-		instruction_t jne{}; jne.load(func->func_id, { 0x75, 0x08 });
+		instruction_t jne{}; jne.load(func->func_id, x86_opcodes::JNE_REL8);
 
-		instruction_t pop_f{}; pop_f.load(func->func_id, { 0x66, 0x9D });
+		instruction_t pop_f{}; pop_f.load(func->func_id, x86_opcodes::POPF);
 
-		instruction_t pop_rax{}; pop_rax.load(func->func_id, { 0x58 });
+		instruction_t pop_rax{}; pop_rax.load(func->func_id, x86_opcodes::POP_RAX);
 
-		instruction_t jmp{}; jmp.load(func->func_id, { 0xE9,0x00,0x00,0x00,0x00 });
+		instruction_t jmp{}; jmp.load(func->func_id, x86_opcodes::JMP_REL32);
 		jmp.relative.target_inst_id = current_block->block_id == 0 ? new_id : current_block->instructions.begin()->inst_id;
 		jmp.relative.target_func_id = func->func_id;
 
@@ -167,19 +179,19 @@ bool obfuscatecff::apply_control_flow_flattening(std::vector<obfuscatecff::funct
 
 		// Save register state
 		instruction_t preserve_rax{};
-		preserve_rax.load(func->func_id, { 0x50 }); // push rax - push rax to stack
+		preserve_rax.load(func->func_id, x86_opcodes::PUSH_RAX); // push rax to stack
 
 		instruction_t preserve_flags{};
-		preserve_flags.load(func->func_id, { 0x66, 0x9C }); // pushf - push flags to stack
+		preserve_flags.load(func->func_id, x86_opcodes::PUSHF); // push flags to stack
 
 		// Load target block ID into EAX register
 		instruction_t load_state{};
-		load_state.load(func->func_id, { 0xB8, 0x00, 0x00, 0x00, 0x00 }); // mov eax, imm32
+		load_state.load(func->func_id, x86_opcodes::MOV_EAX_IMM32); // mov eax, imm32
 		*(uint32_t*)(&load_state.raw_bytes.data()[1]) = target_block_id;
 
 		// Jump back to dispatcher
 		instruction_t return_to_dispatcher{};
-		return_to_dispatcher.load(func->func_id, { 0xE9, 0x00, 0x00, 0x00, 0x00 }); // jmp rel32
+		return_to_dispatcher.load(func->func_id, x86_opcodes::JMP_REL32); // jmp rel32
 		return_to_dispatcher.relative.target_func_id = func->func_id;
 		return_to_dispatcher.relative.target_inst_id = (func->instructions.begin() + 3)->inst_id;
 
