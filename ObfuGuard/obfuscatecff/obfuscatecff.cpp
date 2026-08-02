@@ -1,6 +1,8 @@
 ﻿#include "obfuscatecff.h"
 #include <iostream>
 #include <bit>
+#include <cstdint>
+#include <climits>
 #include <unordered_set>
 #include <unordered_map>
 
@@ -12,7 +14,6 @@ ZydisDecoder decoder;
 int obfuscatecff::instruction_id = 0;
 int obfuscatecff::function_iterator = 0;
 
-// 32-bit right rotation function
 __forceinline int _strcmp(const char* s1, const char* s2)
 {
 	while (*s1 && (*s1 == *s2))

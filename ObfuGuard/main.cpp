@@ -1,14 +1,13 @@
-﻿#include <iostream>
+#include <iostream>
 #include <string>
 #include <filesystem>
 #include <vector>
 #include <limits>
 #include <iomanip>
-#include <ctime>
+#include <chrono>
 #include <stdexcept>
 #include <fstream>
 
-#define NOMINMAX
 #include <windows.h>
 
 #include "pe/pe.h"
@@ -28,10 +27,12 @@ void print_menu() {
     std::cout << "Enter your choice (0-2): ";
 }
 
-// Get input file and validate it
 bool get_file_input(const std::string& prompt, std::string& file_path) {
     std::cout << prompt;
-    std::getline(std::cin, file_path);
+    if (!std::getline(std::cin, file_path)) {
+        std::cerr << "Error: Failed to read input.\n";
+        return false;
+    }
 
     if (!file_path.empty() && file_path.front() == '"' && file_path.back() == '"') {
         file_path = file_path.substr(1, file_path.length() - 2);
@@ -47,104 +48,81 @@ bool get_file_input(const std::string& prompt, std::string& file_path) {
     return true;
 }
 
-// Automatically detect PE file architecture
-bool DetectPEArchitecture(const std::string& filePath, bool& is64Bit) {
-    std::ifstream peFile(filePath, std::ios::binary);
-    if (!peFile.is_open()) {
-        std::cerr << "Error [DetectPE]: Could not open file: " << filePath << std::endl;
+bool detect_pe_architecture(const std::string& file_path, bool& is_64_bit) {
+    std::ifstream pe_file(file_path, std::ios::binary);
+    if (!pe_file.is_open()) {
+        std::cerr << "Error [DetectPE]: Could not open file: " << file_path << std::endl;
         return false;
     }
 
-    // Read DOS header
-    IMAGE_DOS_HEADER dosHeader;
-    if (!peFile.read(reinterpret_cast<char*>(&dosHeader), sizeof(IMAGE_DOS_HEADER))) {
-        std::cerr << "Error [DetectPE]: Could not read DOS header from: " << filePath << std::endl;
-        peFile.close();
+    IMAGE_DOS_HEADER dos_header;
+    if (!pe_file.read(reinterpret_cast<char*>(&dos_header), sizeof(IMAGE_DOS_HEADER))) {
+        std::cerr << "Error [DetectPE]: Could not read DOS header from: " << file_path << std::endl;
         return false;
     }
 
-    // Check DOS signature (MZ)
-    if (dosHeader.e_magic != IMAGE_DOS_SIGNATURE) { // 0x5A4D (MZ)
-        std::cerr << "Error [DetectPE]: Not a valid PE file (Missing MZ signature): " << filePath << std::endl;
-        peFile.close();
+    if (dos_header.e_magic != IMAGE_DOS_SIGNATURE) {
+        std::cerr << "Error [DetectPE]: Not a valid PE file (Missing MZ signature): " << file_path << std::endl;
         return false;
     }
 
-    // Check e_lfanew to ensure it is valid
-    if (dosHeader.e_lfanew == 0 || static_cast<long>(dosHeader.e_lfanew) < 0) {
-        std::cerr << "Error [DetectPE]: Invalid PE header offset (e_lfanew is " << dosHeader.e_lfanew << ") in: " << filePath << std::endl;
-        peFile.close();
+    if (dos_header.e_lfanew == 0 || static_cast<long>(dos_header.e_lfanew) < 0) {
+        std::cerr << "Error [DetectPE]: Invalid PE header offset (e_lfanew is " << dos_header.e_lfanew << ") in: " << file_path << std::endl;
         return false;
     }
 
-    // Go to PE header position
-    peFile.seekg(dosHeader.e_lfanew, std::ios::beg);
-    if (peFile.fail()) {
-        std::cerr << "Error [DetectPE]: Failed to seek to PE header (e_lfanew: 0x"
-            << std::hex << dosHeader.e_lfanew << std::dec << ") in: " << filePath << std::endl;
-        peFile.close();
+    pe_file.seekg(dos_header.e_lfanew, std::ios::beg);
+    if (pe_file.fail()) {
+        std::cerr << "Error [DetectPE]: Failed to seek to PE header in: " << file_path << std::endl;
         return false;
     }
 
-    // Read PE signature
     DWORD signature;
-    if (!peFile.read(reinterpret_cast<char*>(&signature), sizeof(DWORD))) {
-        std::cerr << "Error [DetectPE]: Could not read PE signature from: " << filePath << std::endl;
-        peFile.close();
+    if (!pe_file.read(reinterpret_cast<char*>(&signature), sizeof(DWORD))) {
+        std::cerr << "Error [DetectPE]: Could not read PE signature from: " << file_path << std::endl;
         return false;
     }
 
-    // Check PE signature (PE00)
-    if (signature != IMAGE_NT_SIGNATURE) { // 0x00004550 (PE00)
-        std::cerr << "Error [DetectPE]: Not a valid PE file (Missing PE signature 'PE00'): " << filePath << std::endl;
-        peFile.close();
+    if (signature != IMAGE_NT_SIGNATURE) {
+        std::cerr << "Error [DetectPE]: Not a valid PE file (Missing PE signature 'PE00'): " << file_path << std::endl;
         return false;
     }
 
-    // Read File header
-    IMAGE_FILE_HEADER fileHeader;
-    if (!peFile.read(reinterpret_cast<char*>(&fileHeader), sizeof(IMAGE_FILE_HEADER))) {
-        std::cerr << "Error [DetectPE]: Could not read File header from: " << filePath << std::endl;
-        peFile.close();
+    IMAGE_FILE_HEADER file_header;
+    if (!pe_file.read(reinterpret_cast<char*>(&file_header), sizeof(IMAGE_FILE_HEADER))) {
+        std::cerr << "Error [DetectPE]: Could not read File header from: " << file_path << std::endl;
         return false;
     }
 
     WORD magic;
-    // Go to Optional header
-    if (!peFile.read(reinterpret_cast<char*>(&magic), sizeof(WORD))) { // Read Magic number
-        std::cerr << "Error [DetectPE]: Could not read Magic number from OptionalHeader in: " << filePath << std::endl;
-        peFile.close();
+    if (!pe_file.read(reinterpret_cast<char*>(&magic), sizeof(WORD))) {
+        std::cerr << "Error [DetectPE]: Could not read Magic number from OptionalHeader in: " << file_path << std::endl;
         return false;
     }
 
-    peFile.close();
-
-    // Check Magic number to determine architecture
-    if (magic == IMAGE_NT_OPTIONAL_HDR32_MAGIC) { // 0x10b
-        is64Bit = false; // 32-bit
+    if (magic == IMAGE_NT_OPTIONAL_HDR32_MAGIC) {
+        is_64_bit = false;
         return true;
     }
-    else if (magic == IMAGE_NT_OPTIONAL_HDR64_MAGIC) { // 0x20b
-        is64Bit = true; // 64-bit
+    else if (magic == IMAGE_NT_OPTIONAL_HDR64_MAGIC) {
+        is_64_bit = true;
         return true;
     }
     else {
-        std::cerr << "Error [DetectPE]: Unknown PE Magic number (0x" << std::hex << magic << std::dec << ") in: " << filePath << std::endl;
+        std::cerr << "Error [DetectPE]: Unknown PE Magic number (0x" << std::hex << magic << std::dec << ") in: " << file_path << std::endl;
         return false;
     }
 }
 
-// Function to get and validate PE file
 bool get_valid_pe_file_path(const std::string& prompt, std::string& path, bool& is_64_bit) {
     if (!get_file_input(prompt, path)) return false;
-    if (!DetectPEArchitecture(path, is_64_bit)) {
+    if (!detect_pe_architecture(path, is_64_bit)) {
         std::cerr << "Failed to determine PE architecture for " << path << ".\n";
         return false;
     }
     return true;
 }
 
-// Function to create output file path
 std::string build_output_path(const std::string& input_path, const std::string& suffix) {
     std::filesystem::path p(input_path);
     std::string stem = p.stem().string();
@@ -154,14 +132,11 @@ std::string build_output_path(const std::string& input_path, const std::string& 
         std::filesystem::path(stem + suffix + extension)).lexically_normal().string();
 }
 
-// Function to print execution time
-void print_execution_time(clock_t begin_time, const std::string& mode_name) {
-    std::cout << mode_name << " completed in "
-        << static_cast<float>(clock() - begin_time) / CLOCKS_PER_SEC
-        << " seconds." << std::endl;
+void print_elapsed_time(std::chrono::steady_clock::time_point start_time, const std::string& mode_name) {
+    auto elapsed = std::chrono::duration<float>(std::chrono::steady_clock::now() - start_time).count();
+    std::cout << mode_name << " completed in " << elapsed << " seconds." << std::endl;
 }
 
-// Main function for control flow flattening (CFF) mode
 int mode_control_flow_flattening() {
     std::cout << "\n=== Control Flow Flattening Mode ===\n";
     std::string binary_path;
@@ -177,13 +152,12 @@ int mode_control_flow_flattening() {
 
     std::cout << "Control Flow Flattening Mode: Detected 64-bit PE" << std::endl;
 
-    const clock_t begin_time = clock(); // Start timing execution
+    auto start_time = std::chrono::steady_clock::now();
 
     try {
         pe64 pe(binary_path);
 
         pdbparser pdb(&pe);
-        // Extract PDB from PE file
         auto functions = pdb.parse_functions();
         if (functions.empty()) {
             std::cout << "Warning: No functions found through PDB. Obfuscation might not be effective or possible." << std::endl;
@@ -192,16 +166,15 @@ int mode_control_flow_flattening() {
             std::cout << "Successfully analyzed all functions." << std::endl;
         }
 
-        std::cout << "Creating new section .0Cff" << std::endl; // Create new section for obfuscated code
+        std::cout << "Creating new section .0Cff" << std::endl;
         auto new_section = pe.create_section(".0Cff", 10000000, IMAGE_SCN_MEM_EXECUTE | IMAGE_SCN_MEM_READ | IMAGE_SCN_CNT_CODE);
 
-        obfuscatecff obf(&pe); // Create obfuscatecff object with PE file
-        obf.create_functions(functions); // Create additional functions from analyzed PDB
+        obfuscatecff obf(&pe);
+        obf.create_functions(functions);
 
         std::cout << "Running Control Flow Flattening Mode" << std::endl;
-        obf.run(new_section, true); // Run control flow flattening (CFF) with new section and create additional functions
+        obf.run(new_section, true);
 
-        // Save obfuscated PE file
         std::string output_filename_str = build_output_path(binary_path, ".cff");
 
         std::cout << "\nSuccessfully control-flow-flattened " << functions.size() << " selected function(s)." << std::endl;
@@ -217,15 +190,14 @@ int mode_control_flow_flattening() {
         return 1;
     }
 
-    print_execution_time(begin_time, "Control Flow Flattening mode");
+    print_elapsed_time(start_time, "Control Flow Flattening mode");
     return 0;
 }
 
-// Main function for junk code injection mode with Trampoline
 int mode_trampoline_junkcode() {
     std::cout << "\n=== Junk Code Injection with Trampoline Mode ===\n";
     std::string input_pe_path;
-    bool is_64_bit;
+    bool is_64_bit = false;
 
     if (!get_valid_pe_file_path("Enter input PE file path: ", input_pe_path, is_64_bit)) {
         return 1;
@@ -235,41 +207,55 @@ int mode_trampoline_junkcode() {
 
     std::string output_pe_path = build_output_path(input_pe_path, ".junk");
 
-    // Choose automatic or manual mode
     std::string mode_choice;
     std::cout << "\nSelect injection mode:\n  1. Auto-inject functions\n  2. Manually choose multiple functions\nEnter your choice (1 or 2): ";
-    std::getline(std::cin, mode_choice);
-
-    const clock_t begin_time = clock();
-
-    int result;
-    if (mode_choice == "1") {
-        result = JunkCodeManager::run_auto_injection_mode(input_pe_path, output_pe_path, is_64_bit);
-    }
-    else if (mode_choice == "2") {
-        result = JunkCodeManager::run_manual_injection_mode(input_pe_path, output_pe_path, is_64_bit);
-    }
-    else {
-        std::cerr << "Invalid mode selected.\n";
+    if (!std::getline(std::cin, mode_choice)) {
+        std::cerr << "Error: Failed to read input.\n";
         return 1;
     }
 
-    if (result == 0) {
-        std::cout << "Output saved to: " << output_pe_path << std::endl;
-        print_execution_time(begin_time, "Junk Code Injection mode");
-    }
+    auto start_time = std::chrono::steady_clock::now();
 
-    return result;
+    try {
+        int result;
+        if (mode_choice == "1") {
+            result = JunkCodeManager::run_auto_injection_mode(input_pe_path, output_pe_path, is_64_bit);
+        }
+        else if (mode_choice == "2") {
+            result = JunkCodeManager::run_manual_injection_mode(input_pe_path, output_pe_path, is_64_bit);
+        }
+        else {
+            std::cerr << "Invalid mode selected.\n";
+            return 1;
+        }
+
+        if (result == 0) {
+            std::cout << "Output saved to: " << output_pe_path << std::endl;
+            print_elapsed_time(start_time, "Junk Code Injection mode");
+        }
+
+        return result;
+    }
+    catch (const std::runtime_error& e) {
+        std::cerr << "Runtime error during Junk Code injection: " << e.what() << std::endl;
+        return 1;
+    }
+    catch (const std::exception& e) {
+        std::cerr << "An unexpected error occurred during Junk Code injection: " << e.what() << std::endl;
+        return 1;
+    }
 }
 
 int main() {
-    srand(static_cast<unsigned int>(time(nullptr)));
     print_banner();
     print_menu();
 
     std::string choice_str;
-    std::getline(std::cin, choice_str);
-    int choice = (choice_str.size() == 1 && std::isdigit(choice_str[0])) ? choice_str[0] - '0' : -1;
+    if (!std::getline(std::cin, choice_str)) {
+        std::cerr << "Error: Failed to read input.\n";
+        return 1;
+    }
+    int choice = (choice_str.size() == 1 && std::isdigit(static_cast<unsigned char>(choice_str[0]))) ? choice_str[0] - '0' : -1;
 
     switch (choice) {
     case 1:
