@@ -2,6 +2,9 @@
 
 #include <filesystem>
 #include <fstream>
+#include <stdexcept>
+#include <cstring>
+#include <algorithm>
 
 
 pe64::pe64(std::string binary_path) {
@@ -18,15 +21,19 @@ pe64::pe64(std::string binary_path) {
 	this->buffer.assign((std::istreambuf_iterator<char>(file_stream)),
 		std::istreambuf_iterator<char>());
 
-	file_stream.close();
-
 	std::vector<uint8_t>temp_buffer = buffer;
+
+	if (temp_buffer.size() < sizeof(IMAGE_DOS_HEADER))
+		throw std::runtime_error("file too small to contain a valid PE header!");
 
 	PIMAGE_DOS_HEADER dos =
 		reinterpret_cast<PIMAGE_DOS_HEADER>(temp_buffer.data());
 
-	if(dos->e_magic != 'ZM')
+	if(dos->e_magic != IMAGE_DOS_SIGNATURE)
 		throw std::runtime_error("input binary isn't a valid pe file!");
+
+	if (dos->e_lfanew < 0 || static_cast<size_t>(dos->e_lfanew) + sizeof(IMAGE_NT_HEADERS) > temp_buffer.size())
+		throw std::runtime_error("invalid PE header offset (e_lfanew out of bounds)!");
 
 	PIMAGE_NT_HEADERS nt =
 		reinterpret_cast<PIMAGE_NT_HEADERS>(temp_buffer.data() + dos->e_lfanew);
@@ -34,17 +41,28 @@ pe64::pe64(std::string binary_path) {
 	if(nt->FileHeader.Machine != IMAGE_FILE_MACHINE_AMD64)
 		throw std::runtime_error("ObfuGuard doesn't support 32bit binaries!");
 
+	constexpr uint32_t MAX_IMAGE_SIZE = 512 * 1024 * 1024; // 512 MB
+	if (nt->OptionalHeader.SizeOfImage > MAX_IMAGE_SIZE)
+		throw std::runtime_error("PE SizeOfImage exceeds maximum allowed size!");
+
 	this->buffer.resize(nt->OptionalHeader.SizeOfImage);
 
 	memset(this->buffer.data(), 0, nt->OptionalHeader.SizeOfImage);
 
 	auto first_section = IMAGE_FIRST_SECTION(nt);
 
-	memcpy(this->buffer.data(), temp_buffer.data(), 0x1000);
-	for (int i = 0; i < nt->FileHeader.NumberOfSections; i++) {	
+	uint32_t headers_size = (std::min)(static_cast<uint32_t>(temp_buffer.size()), nt->OptionalHeader.SizeOfHeaders);
+	memcpy(this->buffer.data(), temp_buffer.data(), headers_size);
+
+	for (int i = 0; i < nt->FileHeader.NumberOfSections; i++) {
 
 		auto curr_section = &first_section[i];
-		
+
+		if (curr_section->PointerToRawData + curr_section->SizeOfRawData > temp_buffer.size())
+			continue;
+		if (curr_section->VirtualAddress + curr_section->SizeOfRawData > this->buffer.size())
+			continue;
+
 		memcpy(this->buffer.data() + curr_section->VirtualAddress, temp_buffer.data() + curr_section->PointerToRawData, curr_section->SizeOfRawData);
 
 	}
@@ -60,7 +78,7 @@ std::vector<uint8_t>* pe64::get_buffer_not_relocated() {
 }
 
 PIMAGE_NT_HEADERS pe64::get_nt() {
-	return reinterpret_cast<PIMAGE_NT_HEADERS>(this->buffer.data() + ((PIMAGE_DOS_HEADER)this->buffer.data())->e_lfanew);
+	return reinterpret_cast<PIMAGE_NT_HEADERS>(this->buffer.data() + reinterpret_cast<PIMAGE_DOS_HEADER>(this->buffer.data())->e_lfanew);
 }
 
 PIMAGE_SECTION_HEADER pe64::get_section(std::string sectionname) {
@@ -70,7 +88,7 @@ PIMAGE_SECTION_HEADER pe64::get_section(std::string sectionname) {
 	for (int i = 0; i < this->get_nt()->FileHeader.NumberOfSections; i++) {
 
 		auto curr_section = &first_section[i];
-		if (!_stricmp((char*)curr_section->Name, sectionname.c_str()))
+		if (!_strnicmp(reinterpret_cast<const char*>(curr_section->Name), sectionname.c_str(), IMAGE_SIZEOF_SHORT_NAME))
 			return curr_section;
 	}
 
@@ -78,8 +96,12 @@ PIMAGE_SECTION_HEADER pe64::get_section(std::string sectionname) {
 }
 
 uint32_t pe64::align(uint32_t address, uint32_t alignment) {
-	address += (alignment - (address % alignment));
-	return address;
+	if (alignment == 0)
+		return address;
+	uint32_t remainder = address % alignment;
+	if (remainder == 0)
+		return address;
+	return address + (alignment - remainder);
 }
 
 PIMAGE_SECTION_HEADER pe64::create_section(std::string name, uint32_t size, uint32_t characteristic) {
@@ -92,6 +114,7 @@ PIMAGE_SECTION_HEADER pe64::create_section(std::string name, uint32_t size, uint
 	PIMAGE_SECTION_HEADER last_section = &section_header[file_header->NumberOfSections - 1];
 	PIMAGE_SECTION_HEADER new_section_header = nullptr;
 	new_section_header = (PIMAGE_SECTION_HEADER)((PUCHAR)(&last_section->Characteristics) + 4);
+	memset(new_section_header->Name, 0, IMAGE_SIZEOF_SHORT_NAME);
 	memcpy(new_section_header->Name, name.c_str(), name.length());
 	new_section_header->Misc.VirtualSize = align(size + sizeof(uint32_t) + 1, optional_header->SectionAlignment);
 	new_section_header->VirtualAddress = align(last_section->VirtualAddress + last_section->Misc.VirtualSize, optional_header->SectionAlignment);
@@ -125,18 +148,20 @@ void pe64::save_to_disk(std::string path, PIMAGE_SECTION_HEADER new_section, uin
 	uint32_t original_size = new_section->Misc.VirtualSize;
 	new_section->SizeOfRawData = size;
 	new_section->Misc.VirtualSize = size;
-	this->get_nt()->OptionalHeader.SizeOfImage -= (original_size - size);
+
+	if (size < original_size) {
+		this->get_nt()->OptionalHeader.SizeOfImage -= (original_size - size);
+	}
+
+	uint32_t write_size = (std::min)(static_cast<uint32_t>(this->buffer.size()), this->get_nt()->OptionalHeader.SizeOfImage);
 
 	std::ofstream file_stream(path.c_str(), std::ios_base::out | std::ios_base::binary);
 	if (!file_stream)
 		throw std::runtime_error("couldn't open output binary!");
 
-	if (!file_stream.write((char*)this->buffer.data(), this->get_nt()->OptionalHeader.SizeOfImage)) {
-		file_stream.close();
+	if (!file_stream.write(reinterpret_cast<const char*>(this->buffer.data()), write_size)) {
 		throw std::runtime_error("couldn't write output binary!");
 	}
-
-	file_stream.close();
 }
 
 std::string pe64::get_path() {

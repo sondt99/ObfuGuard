@@ -105,7 +105,7 @@ bool obfuscatecff::apply_control_flow_flattening(std::vector<obfuscatecff::funct
 	func->instructions.begin()->is_first_instruction = false;
 
 	// shuffle the position of blocks in the vector randomly
-	auto rng = std::default_random_engine{};
+	auto rng = std::default_random_engine{std::random_device{}()};
 	std::shuffle(blocks.begin(), blocks.end(), rng);
 
 	// perform flow restructuring with dispatcher through comparison with rax state variable
