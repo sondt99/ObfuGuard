@@ -16,6 +16,9 @@
 #include "junkcode/junkcode.h"
 #include "func2rva/func2rva.h"
 #include "constants.h"
+#include "common/function_discovery.h"
+#include "common/function_filter.h"
+#include "common/function_info.h"
 
 void print_banner() {
     std::cout << "========================================\n";
@@ -156,31 +159,44 @@ int mode_control_flow_flattening() {
     auto start_time = std::chrono::steady_clock::now();
 
     try {
+        // 2. Discover functions (shared step)
+        std::vector<pdbparser::sym_func> sym_functions;
+        {
+            ObfuGuard::FunctionDiscovery discovery(binary_path);
+            const auto& functions = discovery.get_functions();
+            if (functions.empty()) {
+                std::cout << "Warning: No functions found through PDB.\n";
+            } else {
+                std::cout << "Successfully analyzed " << functions.size() << " functions.\n";
+            }
+
+            // Convert to sym_func for CFF engine
+            for (const auto& f : functions) {
+                pdbparser::sym_func sf;
+                sf.offset = f.pdb_offset;
+                sf.name = f.name;
+                sf.size = f.size;
+                sf.obfuscate = true;
+                sf.cff_flattening = true;
+                sym_functions.push_back(sf);
+            }
+        } // FunctionDiscovery goes out of scope here, releasing SymCleanup
+
+        // 3. CFF engine (needs its own pe64 for VA-mapped buffer)
         pe64 pe(binary_path);
-
-        pdbparser pdb(&pe);
-        auto functions = pdb.parse_functions();
-        if (functions.empty()) {
-            std::cout << "Warning: No functions found through PDB. Obfuscation might not be effective or possible." << std::endl;
-        }
-        else {
-            std::cout << "Successfully analyzed all functions." << std::endl;
-        }
-
-        std::cout << "Creating new section " << ObfuGuard::CFF_SECTION_NAME << std::endl;
-        auto new_section = pe.create_section(ObfuGuard::CFF_SECTION_NAME, ObfuGuard::CFF_SECTION_SIZE, IMAGE_SCN_MEM_EXECUTE | IMAGE_SCN_MEM_READ | IMAGE_SCN_CNT_CODE);
+        auto new_section = pe.create_section(ObfuGuard::CFF_SECTION_NAME, ObfuGuard::CFF_SECTION_SIZE,
+            IMAGE_SCN_MEM_EXECUTE | IMAGE_SCN_MEM_READ | IMAGE_SCN_CNT_CODE);
 
         obfuscatecff obf(&pe);
-        obf.create_functions(functions);
-
-        std::cout << "Running Control Flow Flattening Mode" << std::endl;
+        obf.create_functions(sym_functions);
+        std::cout << "Running Control Flow Flattening Mode\n";
         obf.run(new_section, true);
 
-        std::string output_filename_str = build_output_path(binary_path, ".cff");
-
-        std::cout << "\nSuccessfully control-flow-flattened " << functions.size() << " selected function(s)." << std::endl;
-        std::cout << "Output saved to: " << output_filename_str << std::endl;
-        pe.save_to_disk(output_filename_str, new_section, obf.get_added_size());
+        // 4. Save
+        std::string output = build_output_path(binary_path, ".cff");
+        std::cout << "\nSuccessfully control-flow-flattened " << sym_functions.size() << " function(s).\n";
+        std::cout << "Output saved to: " << output << std::endl;
+        pe.save_to_disk(output, new_section, obf.get_added_size());
     }
     catch (const std::runtime_error& e) {
         std::cerr << "Runtime error during CFF obfuscation: " << e.what() << std::endl;
@@ -208,22 +224,38 @@ int mode_trampoline_junkcode() {
 
     std::string output_pe_path = build_output_path(input_pe_path, ".junk");
 
-    std::string mode_choice;
-    std::cout << "\nSelect injection mode:\n  1. Auto-inject functions\n  2. Manually choose multiple functions\nEnter your choice (1 or 2): ";
-    if (!std::getline(std::cin, mode_choice)) {
-        std::cerr << "Error: Failed to read input.\n";
-        return 1;
-    }
-
     auto start_time = std::chrono::steady_clock::now();
 
     try {
+        // 2. Discover functions (shared step -- same as CFF)
+        std::vector<ObfuGuard::FunctionInfo> all_functions;
+        {
+            ObfuGuard::FunctionDiscovery discovery(input_pe_path);
+            all_functions = discovery.get_functions(); // copy, since discovery will be destroyed
+        }
+
+        if (all_functions.empty()) {
+            std::cerr << "Error: No functions found through PDB.\n";
+            return 1;
+        }
+
+        std::cout << "Discovered " << all_functions.size() << " functions from PDB.\n";
+
+        // 3. Choose mode
+        std::string mode_choice;
+        std::cout << "\nSelect injection mode:\n  1. Auto-inject functions\n  2. Manually choose multiple functions\nEnter your choice (1 or 2): ";
+        if (!std::getline(std::cin, mode_choice)) {
+            std::cerr << "Error: Failed to read input.\n";
+            return 1;
+        }
+
+        // 4. Run engine
         int result;
         if (mode_choice == "1") {
-            result = JunkCodeManager::run_auto_injection_mode(input_pe_path, output_pe_path, is_64_bit);
+            result = JunkCodeManager::run_auto_injection_mode(input_pe_path, output_pe_path, is_64_bit, all_functions);
         }
         else if (mode_choice == "2") {
-            result = JunkCodeManager::run_manual_injection_mode(input_pe_path, output_pe_path, is_64_bit);
+            result = JunkCodeManager::run_manual_injection_mode(input_pe_path, output_pe_path, is_64_bit, all_functions);
         }
         else {
             std::cerr << "Invalid mode selected.\n";
