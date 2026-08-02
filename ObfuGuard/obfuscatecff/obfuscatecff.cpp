@@ -59,17 +59,18 @@ void obfuscatecff::create_functions(std::vector<pdbparser::sym_func>functions) {
 		auto address_to_analyze = this->pe->get_buffer()->data() + text_section->VirtualAddress + function.offset;
 		uint32_t offset = 0;
 
-		function_t new_function(function_iterator++, function.name, function.offset, function.size); // initialize a new function_t object with information from pdbparser
+		int current_func_id = function_iterator++;
+		function_t new_function(current_func_id, function.name, function.offset, function.size);
 
-		new_function.ctfflattening = function.ctfflattening; // if function is marked for flattening then mark in function_t object
+		new_function.ctfflattening = function.ctfflattening;
 
-		std::vector <uint64_t> runtime_addresses; // list of runtime addresses of instructions in the function
+		std::vector <uint64_t> runtime_addresses;
 
-		while (ZYAN_SUCCESS(ZydisDisassembleIntel(ZYDIS_MACHINE_MODE_LONG_64, (ZyanU64)(address_to_analyze + offset), (const void*)(address_to_analyze + offset), function.size - offset, &zyinstruction))) { // analyze each instruction in the function
+		while (ZYAN_SUCCESS(ZydisDisassembleIntel(ZYDIS_MACHINE_MODE_LONG_64, (ZyanU64)(address_to_analyze + offset), (const void*)(address_to_analyze + offset), function.size - offset, &zyinstruction))) {
 
 			instruction_t new_instruction{};
 			new_instruction.runtime_address = (uint64_t)address_to_analyze + offset;
-			new_instruction.load(function_iterator, zyinstruction, new_instruction.runtime_address);
+			new_instruction.load(current_func_id, zyinstruction, new_instruction.runtime_address);
 			if (offset == 0)
 				new_instruction.is_first_instruction = true;
 			new_function.instructions.push_back(new_instruction);
@@ -360,8 +361,8 @@ bool obfuscatecff::fix_relative_jmps(function_t* func) {
 				break;
 			}
 			case 32: {
-				signed int distance = inst.relocated_address - instruction_iter->relocated_address - instruction_iter->zyinstr.info.length;
-				if (distance > 2147483647 || distance < -2147483648)
+				int64_t distance = (int64_t)inst.relocated_address - (int64_t)instruction_iter->relocated_address - (int64_t)instruction_iter->zyinstr.info.length;
+				if (distance > INT32_MAX || distance < INT32_MIN)
 				{
 
 					return false;
@@ -513,7 +514,7 @@ void obfuscatecff::compile(PIMAGE_SECTION_HEADER new_section) {
 
 		auto first_instruction = func->instructions.begin();
 
-		const uint8_t jmp_shell[] = { 0xE9, 0x00, 0x00, 0x00, 0x00 };
+		uint8_t jmp_shell[] = { 0xE9, 0x00, 0x00, 0x00, 0x00 };
 
 		if (func->offset != -1) {
 			uint32_t src = text_section->VirtualAddress + func->offset;

@@ -165,12 +165,13 @@ void print_execution_time(clock_t begin_time, const std::string& mode_name) {
 int mode_control_flow_flattening() {
     std::cout << "\n=== Control Flow Flattening Mode ===\n";
     std::string binary_path;
-    bool is_64_bit;
+    bool is_64_bit = false;
 
-    if (!get_valid_pe_file_path("Enter PE file path for CFF: ", binary_path, is_64_bit) || !is_64_bit) {
-        if (!is_64_bit) {
-            std::cerr << "Error: Control Flow Flattening only supports 64-bit PE files.\n";
-        }
+    if (!get_valid_pe_file_path("Enter PE file path for CFF: ", binary_path, is_64_bit)) {
+        return 1;
+    }
+    if (!is_64_bit) {
+        std::cerr << "Error: Control Flow Flattening only supports 64-bit PE files.\n";
         return 1;
     }
 

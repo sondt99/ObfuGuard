@@ -361,11 +361,11 @@ std::string TrampolineInjector::get_random_junk_instruction() {
             "xor r10, 0x9ABC; xor r10, 0x9ABC",
             "xor r11, 0xDEF0; xor r11, 0xDEF0",
 
-            // Simple bit operations
-            "shl r8, 2; shr r8, 2",
-            "shl r9, 3; shr r9, 3",
-            "shr r10, 1; shl r10, 1",
-            "shr r11, 2; shl r11, 2",
+            // Bit rotation pairs (safe — rotate is fully reversible)
+            "rol r8, 3; ror r8, 3",
+            "ror r9, 5; rol r9, 5",
+            "rol r10, 7; ror r10, 7",
+            "ror r11, 4; rol r11, 4",
 
             // Cross-register stack
             "push r8; push r9; pop r9; pop r8",
@@ -391,7 +391,7 @@ std::string TrampolineInjector::get_random_junk_instruction() {
             "dec r11; inc r11",
 
             // Multiple operations that don't change value
-            "mov r8, r9; mov r9, r8; mov r8, r9; mov r9, r8",
+            "push r8; pop r8; push r9; pop r9",
             "add r8, 1; add r8, 1; sub r8, 2",
             "sub r9, 5; add r9, 3; add r9, 2",
 
@@ -1093,7 +1093,7 @@ const std::set<std::string> JunkCodeManager::DANGEROUS_FUNCTION_NAMES = {
     "exit", "fget", "fwrite", "memcpy", "memmove", "memset", "malloc", "free",
     "fread", "fclose", "fopen", "fprintf", "printf", "sprintf", "snprintf",
     "strcpy", "strncpy", "strcat", "strncat", "strlen", "strcmp", "strncmp",
-    "fgetc", "fgets", "fputc", "fputs", "vfprintf", "vprintf", "vsprintf", "fgetpos", "fsetpos", "fegetenv"
+    "fgetc", "fgets", "fputc", "fputs", "vfprintf", "vprintf", "vsprintf", "fgetpos", "fsetpos", "fegetenv",
     "srand", "rand", "time", "localtime", "gmtime", "asctime", "ctime",
     "clock", "ceil", "wcsnlen", "strpbrk", "GetLocaleNameFromLanguage", "strcspn", "memcmp", "qsort",
 };

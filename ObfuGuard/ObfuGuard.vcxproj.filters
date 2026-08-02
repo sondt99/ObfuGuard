@@ -1,4 +1,4 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8"?>
 <Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup>
     <Filter Include="Source Files">
@@ -13,23 +13,41 @@
       <UniqueIdentifier>{67DA6AB6-F800-4c08-8B7A-83BB121AAD01}</UniqueIdentifier>
       <Extensions>rc;ico;cur;bmp;dlg;rc2;rct;bin;rgs;gif;jpg;jpeg;jpe;resx;tiff;tif;png;wav;mfcribbon-ms</Extensions>
     </Filter>
-    <Filter Include="Header Files\pe">
+    <Filter Include="Source Files\pe">
       <UniqueIdentifier>{b6712773-dd1f-4c86-8ff4-20a4ceb6c25c}</UniqueIdentifier>
     </Filter>
-    <Filter Include="Header Files\pdbparser">
+    <Filter Include="Source Files\pdbparser">
       <UniqueIdentifier>{9b2f408d-e68f-41b5-bfcd-67ed1770e511}</UniqueIdentifier>
     </Filter>
-    <Filter Include="Header Files\junkcode">
+    <Filter Include="Source Files\junkcode">
       <UniqueIdentifier>{0e1439f8-0717-4be5-9e3f-80594bee47e0}</UniqueIdentifier>
     </Filter>
-    <Filter Include="Header Files\func2rva">
+    <Filter Include="Source Files\func2rva">
       <UniqueIdentifier>{985e8aa0-25d2-46b9-a061-2e229643d615}</UniqueIdentifier>
     </Filter>
-    <Filter Include="Header Files\obfuscatecff">
+    <Filter Include="Source Files\obfuscatecff">
       <UniqueIdentifier>{6bc6de98-a458-4d3a-b28d-cad8793768e2}</UniqueIdentifier>
     </Filter>
-    <Filter Include="Header Files\cfflattening">
+    <Filter Include="Source Files\cfflattening">
       <UniqueIdentifier>{f70b6adc-3166-4ac6-9993-74123ca3bf96}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\pe">
+      <UniqueIdentifier>{a1b2c3d4-1111-2222-3333-444455556601}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\pdbparser">
+      <UniqueIdentifier>{a1b2c3d4-1111-2222-3333-444455556602}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\junkcode">
+      <UniqueIdentifier>{a1b2c3d4-1111-2222-3333-444455556603}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\func2rva">
+      <UniqueIdentifier>{a1b2c3d4-1111-2222-3333-444455556604}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\obfuscatecff">
+      <UniqueIdentifier>{a1b2c3d4-1111-2222-3333-444455556605}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\cfflattening">
+      <UniqueIdentifier>{a1b2c3d4-1111-2222-3333-444455556606}</UniqueIdentifier>
     </Filter>
   </ItemGroup>
   <ItemGroup>
@@ -37,22 +55,22 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="pe\pe.cpp">
-      <Filter>Header Files\pe</Filter>
+      <Filter>Source Files\pe</Filter>
     </ClCompile>
     <ClCompile Include="pdbparser\pdbparser.cpp">
-      <Filter>Header Files\pdbparser</Filter>
+      <Filter>Source Files\pdbparser</Filter>
     </ClCompile>
     <ClCompile Include="junkcode\junkcode.cpp">
-      <Filter>Header Files\junkcode</Filter>
+      <Filter>Source Files\junkcode</Filter>
     </ClCompile>
     <ClCompile Include="func2rva\func2rva.cpp">
-      <Filter>Header Files\func2rva</Filter>
+      <Filter>Source Files\func2rva</Filter>
     </ClCompile>
     <ClCompile Include="obfuscatecff\obfuscatecff.cpp">
-      <Filter>Header Files\obfuscatecff</Filter>
+      <Filter>Source Files\obfuscatecff</Filter>
     </ClCompile>
     <ClCompile Include="cfflattening\cfflattening.cpp">
-      <Filter>Header Files\cfflattening</Filter>
+      <Filter>Source Files\cfflattening</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
