@@ -381,7 +381,7 @@ std::string TrampolineInjector::get_random_junk_instruction() {
         "rol r8, 1; ror r8, 1",
         "rol r9, 2; ror r9, 2",
         "ror r10, 3; rol r10, 3",
-        "ror r11, 4; rol r11, 4",
+        "ror r11, 6; rol r11, 6",
 
         // INC/DEC pairs
         "inc r8; dec r8",
@@ -1042,12 +1042,12 @@ const std::set<std::string> JunkCodeManager::DANGEROUS_FUNCTION_NAMES = {
 };
 
 const std::set<std::string> JunkCodeManager::DANGEROUS_FUNCTION_NAMES_BIG_BINARY = {
-    "DetectPEArchitecture", "main", "pe64::pe64", "pdbparser::pdbparser", "obfuscatecff::obfuscatecff", "obfuscatecff::run", "obfuscatecff::compile", "obfuscatecff::~obfuscatecff", "TrampolineInjector::TrampolineInjector", "TrampolineInjector::~TrampolineInjector", "FuncToRVA::RVAResolver::initialize", "FuncToRVA::RVAResolver::RVAResolver", "FuncToRVA::RVAResolver::~RVAResolver",
+    "detect_pe_architecture", "main", "pe64::pe64", "pdbparser::pdbparser", "obfuscatecff::obfuscatecff", "obfuscatecff::run", "obfuscatecff::compile", "obfuscatecff::~obfuscatecff", "TrampolineInjector::TrampolineInjector", "TrampolineInjector::~TrampolineInjector", "FuncToRVA::RVAResolver::initialize", "FuncToRVA::RVAResolver::RVAResolver", "FuncToRVA::RVAResolver::~RVAResolver",
     "terminate", "raise", "raise$fin$0", "std::setw", "ceilf", "InternalCompareStringA", "InternalGetLocaleInfoA",
     "std::filesystem::exists", "std::filesystem::path::path", "std::filesystem::path::operator/=", "std::filesystem::path::string", "std::filesystem::operator/", "std::vector<unsigned char,std::allocator<unsigned char> >::vector<unsigned char,std::allocator<unsigned char> >", "std::vector<unsigned char,std::allocator<unsigned char> >::resize", "std::vector<unsigned int,std::allocator<unsigned int> >::operator=", "std::exception::exception", "std::exception::what",
-    "strrchr", "srand", "CountryEnumProc","LangCountryEnumProc", "LangCountryEnumProcEx","strnlen", "strrchr", "strtol","strtoul","wcschr","wcscmp","wcsncmp","wcspbrk","isdigit","islower","isupper",
-    "GetLcidFromLanguage","GetLcidFromLangCountry","TranslateName", "TranslateName","TestDefaultLanguage","setSBCS",
-    "setSBUpLow","setvbuf","getSystemCP","ExFilterRethrow","ExFilterRethrowFH4","fallbackMethod","fallbackMethod","FH4::HandlerMap4::HandlerMap4","FH4::HandlerMap4::DecompHandler",
+    "strrchr", "srand", "CountryEnumProc","LangCountryEnumProc", "LangCountryEnumProcEx","strnlen", "strtol","strtoul","wcschr","wcscmp","wcsncmp","wcspbrk","isdigit","islower","isupper",
+    "GetLcidFromLanguage","GetLcidFromLangCountry","TranslateName","TestDefaultLanguage","setSBCS",
+    "setSBUpLow","setvbuf","getSystemCP","ExFilterRethrow","ExFilterRethrowFH4","fallbackMethod","FH4::HandlerMap4::HandlerMap4","FH4::HandlerMap4::DecompHandler",
     "FH4::TryBlockMap4::TryBlockMap4","FH4::TryBlockMap4::setBuffer","FH4::UWMap4::ReadEntry","FH4::UWMap4::getStateFromIterators","FH4::UWMap4::getStartStop","IsInExceptionSpec",
 };
 

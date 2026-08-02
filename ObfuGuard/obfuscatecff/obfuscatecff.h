@@ -10,8 +10,8 @@
 class obfuscatecff {
 private:
     pe64* pe;
-    ZydisFormatter formatter;
-    ZydisDecoder decoder;
+    static ZydisFormatter formatter;
+    static ZydisDecoder decoder;
     struct func_id_instr_id {
         int func_id;
         int inst_index;
