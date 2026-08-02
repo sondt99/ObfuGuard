@@ -1,0 +1,109 @@
+# Priority labels
+- name: "P0-critical"
+  color: "b60205"
+  description: "Critical - blocks further development"
+
+- name: "P1-high"
+  color: "d93f0b"
+  description: "High priority - significant impact"
+
+- name: "P2-medium"
+  color: "fbca04"
+  description: "Medium priority - improves quality"
+
+- name: "P3-low"
+  color: "0e8a16"
+  description: "Low priority - nice-to-have"
+
+# Type labels
+- name: "bug"
+  color: "d73a4a"
+  description: "Something isn't working"
+
+- name: "enhancement"
+  color: "a2eeef"
+  description: "New feature or request"
+
+- name: "refactor"
+  color: "7057ff"
+  description: "Code refactoring / cleanup"
+
+- name: "code-quality"
+  color: "bfdadc"
+  description: "Code quality improvement"
+
+- name: "documentation"
+  color: "0075ca"
+  description: "Documentation improvements"
+
+- name: "performance"
+  color: "f9d0c4"
+  description: "Performance optimization"
+
+# Component labels
+- name: "component:cff"
+  color: "c5def5"
+  description: "Control Flow Flattening engine"
+
+- name: "component:junkcode"
+  color: "d4c5f9"
+  description: "Junk Code Injection engine"
+
+- name: "component:pe-parser"
+  color: "bfd4f2"
+  description: "PE file parser module"
+
+- name: "component:pdb-parser"
+  color: "c2e0c6"
+  description: "PDB symbol parser module"
+
+- name: "component:func2rva"
+  color: "fef2c0"
+  description: "Function-to-RVA resolver"
+
+- name: "component:cli"
+  color: "e6e6e6"
+  description: "CLI / main entry point"
+
+- name: "component:build"
+  color: "f9e4b7"
+  description: "Build system / vcxproj"
+
+# Risk labels
+- name: "risk:low"
+  color: "0e8a16"
+  description: "Low risk - isolated change"
+
+- name: "risk:medium"
+  color: "fbca04"
+  description: "Medium risk - touches core logic"
+
+- name: "risk:high"
+  color: "b60205"
+  description: "High risk - structural change"
+
+# Status labels
+- name: "needs-triage"
+  color: "ededed"
+  description: "Needs triage and prioritization"
+
+- name: "ready"
+  color: "0e8a16"
+  description: "Ready to be worked on"
+
+- name: "in-progress"
+  color: "fbca04"
+  description: "Currently being worked on"
+
+- name: "blocked"
+  color: "b60205"
+  description: "Blocked by another issue"
+
+# Difficulty labels
+- name: "good-first-issue"
+  color: "7057ff"
+  description: "Good for newcomers"
+
+- name: "complex"
+  color: "d93f0b"
+  description: "Requires deep understanding of the codebase"

@@ -1,0 +1,135 @@
+name: "Refactor"
+description: "Propose a code refactoring, cleanup, or architectural improvement"
+title: "[Refactor]: "
+labels: ["refactor", "code-quality"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ## Refactoring Proposal
+        Describe the refactoring work needed and why it matters.
+
+  - type: dropdown
+    id: scope
+    attributes:
+      label: "Scope"
+      description: "What area of the codebase does this affect?"
+      options:
+        - "obfuscatecff (CFF engine)"
+        - "cfflattening (CFF algorithm)"
+        - "junkcode (Junk code engine)"
+        - "pe (PE parser)"
+        - "pdbparser (PDB parser)"
+        - "func2rva (RVA resolver)"
+        - "main.cpp (CLI entry point)"
+        - "Build system (vcxproj)"
+        - "Cross-cutting / multiple modules"
+        - "Tests / benchmarks"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: type
+    attributes:
+      label: "Refactor Type"
+      description: "What kind of refactoring is this?"
+      options:
+        - "Code cleanup / dead code removal"
+        - "Extract class / module"
+        - "Improve error handling"
+        - "Memory safety / resource management"
+        - "Naming consistency"
+        - "Remove magic numbers / hardcoded values"
+        - "Reduce complexity / simplify logic"
+        - "Performance optimization"
+        - "API redesign"
+        - "Build configuration"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: priority
+    attributes:
+      label: "Priority"
+      description: "How urgent is this refactoring?"
+      options:
+        - "P0 - Critical (blocks further development)"
+        - "P1 - High (significant code quality impact)"
+        - "P2 - Medium (improves maintainability)"
+        - "P3 - Low (nice-to-have cleanup)"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: risk
+    attributes:
+      label: "Risk Level"
+      description: "How risky is this change?"
+      options:
+        - "Low - Isolated change, unlikely to break anything"
+        - "Medium - Touches core logic, needs careful testing"
+        - "High - Structural change, extensive testing required"
+    validations:
+      required: true
+
+  - type: textarea
+    id: current
+    attributes:
+      label: "Current State"
+      description: "Describe the current code and what's wrong with it. Include file paths and line numbers."
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposed
+    attributes:
+      label: "Proposed Changes"
+      description: "Describe exactly what should change."
+    validations:
+      required: true
+
+  - type: textarea
+    id: rationale
+    attributes:
+      label: "Rationale"
+      description: "Why is this refactoring needed? What improves?"
+    validations:
+      required: true
+
+  - type: textarea
+    id: tasks
+    attributes:
+      label: "Implementation Tasks"
+      description: "Break down the work into discrete steps."
+      value: |
+        - [ ] Task 1
+        - [ ] Task 2
+        - [ ] Verify: run type-check / build
+        - [ ] Verify: test obfuscated output still works
+    validations:
+      required: true
+
+  - type: textarea
+    id: testing
+    attributes:
+      label: "Testing Strategy"
+      description: "How will you verify the refactoring doesn't break anything?"
+      value: |
+        - [ ] Build succeeds in Release|x64
+        - [ ] CFF mode: obfuscate test binary, verify output runs
+        - [ ] Junk mode: obfuscate test binary, verify output runs
+        - [ ] Run `match_check.py` on test suite
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: "Pre-submission Checklist"
+      options:
+        - label: "I have verified this is not a duplicate of an existing issue"
+          required: true
+        - label: "This refactoring does not change external behavior"
+          required: true
+        - label: "I have identified all files that need to change"
+          required: true

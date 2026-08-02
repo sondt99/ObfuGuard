@@ -1,0 +1,116 @@
+name: "Bug Report"
+description: "Report a bug or unexpected behavior in ObfuGuard"
+title: "[Bug]: "
+labels: ["bug", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ## Bug Report
+        Thanks for taking the time to report a bug. Please fill out the sections below.
+
+  - type: dropdown
+    id: component
+    attributes:
+      label: "Affected Component"
+      description: "Which part of ObfuGuard is affected?"
+      options:
+        - "Control Flow Flattening (CFF)"
+        - "Junk Code Injection"
+        - "PE Parser"
+        - "PDB Parser"
+        - "Function-to-RVA Resolver"
+        - "CLI / Main"
+        - "Build System"
+        - "Benchmark Suite"
+        - "Other"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: severity
+    attributes:
+      label: "Severity"
+      description: "How severe is the impact?"
+      options:
+        - "Critical - Crash / Data loss"
+        - "High - Obfuscated binary broken"
+        - "Medium - Incorrect output but no crash"
+        - "Low - Cosmetic / minor issue"
+    validations:
+      required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: "Description"
+      description: "A clear and concise description of the bug."
+      placeholder: "When I run ObfuGuard with CFF mode on a binary compiled with /O2, the output crashes on startup..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: "Steps to Reproduce"
+      description: "Step-by-step instructions to reproduce the behavior."
+      value: |
+        1. Compile target with: `cl /Zi /O2 /Fe:target.exe target.cpp`
+        2. Run ObfuGuard: `.\ObfuGuard.exe`
+        3. Select mode: ...
+        4. Enter path: ...
+        5. Observe: ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: "Expected Behavior"
+      description: "What did you expect to happen?"
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: "Actual Behavior"
+      description: "What actually happened? Include error messages or crash info."
+    validations:
+      required: true
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: "Environment"
+      description: "Your system and build environment."
+      value: |
+        - OS: Windows 11 x64
+        - Visual Studio: 2022 (v17.x)
+        - ObfuGuard version: v3.0
+        - Target binary arch: x64
+        - Target binary compiler: MSVC
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: "Logs / Screenshots"
+      description: "Paste relevant console output, IDA screenshots, or crash dumps."
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: "Pre-submission Checklist"
+      options:
+        - label: "I have searched existing issues for duplicates"
+          required: true
+        - label: "I have tested with the latest version of ObfuGuard"
+          required: true
+        - label: "I have included the target binary's architecture (32/64-bit)"
+          required: true
+        - label: "I have verified the PDB file matches the PE file"
+          required: false
