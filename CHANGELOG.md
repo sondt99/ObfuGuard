@@ -70,7 +70,7 @@ Format follows [Semantic Versioning](https://semver.org/).
 - New `common/` module: `function_info.h`, `function_discovery.h/.cpp`, `function_filter.h/.cpp`
 - Source files properly organized in Visual Studio filters (`.cpp` → Source Files, `.h` → Header Files)
 
-## [3.0.0] - 2025-07-15
+## [3.0.0] - 2025-06-25
 
 ### Added
 - Binary size-aware function blacklisting for binaries > 350 KB
