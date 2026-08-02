@@ -27,7 +27,7 @@ public:
 		std::string name;
 		uint32_t size = 0;
 		bool obfuscate = true;
-		bool ctfflattening = true;	
+		bool cff_flattening = true;
 	};
 
 	pdbparser(pe64* pe);

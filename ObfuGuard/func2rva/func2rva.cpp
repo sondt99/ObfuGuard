@@ -92,25 +92,13 @@ namespace FuncToRVA { // Namespace for resolving functions to RVAs
 	// Return list of resolved functions. If not initialized, return empty list and report error.
     const std::vector<FunctionInfo>& RVAResolver::get_functions_info() const {
         if (!is_initialized_) {
-            static std::vector<FunctionInfo> empty_list; 
-            std::cerr << "Error: RVAResolver has not been initialized. Please call initialize() first." << std::endl;
-            return empty_list;
+            throw std::runtime_error("RVAResolver has not been initialized. Please call initialize() first.");
         }
         return resolved_functions_list_;
     }
 
-	// Display list of functions, let user select one function to get RVA
-    bool RVAResolver::select_function_rva_interactive(uint32_t& out_rva) {
-        if (!is_initialized_) {
-            std::cerr << "Error: RVAResolver has not been initialized. Please call initialize() first." << std::endl;
-            return false;
-        }
-
-        if (resolved_functions_list_.empty()) {
-            std::cout << "Info: No functions from PDB available to select." << std::endl;
-            return false;
-        }
-
+    // Display the function table (header, columns, and all rows)
+    void RVAResolver::display_function_table() const {
         std::cout << "\nAvailable functions from PDB for file: " << pe_path_str_ << std::endl;
         std::cout << "PE ImageBase: 0x" << std::hex << image_base_ << std::dec << std::endl;
         if (has_text_section_for_reference_) {
@@ -140,6 +128,21 @@ namespace FuncToRVA { // Namespace for resolving functions to RVAs
                 << func_info.name << std::endl;
         }
         std::cout << "----------------------------------------------------------------------------------------------------" << std::endl;
+    }
+
+	// Display list of functions, let user select one function to get RVA
+    bool RVAResolver::select_function_rva_interactive(uint32_t& out_rva) {
+        if (!is_initialized_) {
+            std::cerr << "Error: RVAResolver has not been initialized. Please call initialize() first." << std::endl;
+            return false;
+        }
+
+        if (resolved_functions_list_.empty()) {
+            std::cout << "Info: No functions from PDB available to select." << std::endl;
+            return false;
+        }
+
+        display_function_table();
 
         int choice = 0;
         while (true) {
@@ -196,35 +199,7 @@ namespace FuncToRVA { // Namespace for resolving functions to RVAs
             return false;
         }
 
-        std::cout << "\nAvailable functions from PDB for file: " << pe_path_str_ << std::endl;
-        std::cout << "PE ImageBase: 0x" << std::hex << image_base_ << std::dec << std::endl;
-        if (has_text_section_for_reference_) {
-            std::cout << "Using PDB offsets relative to '.text' section (RVA: 0x"
-                << std::hex << text_section_rva_ << std::dec << ")" << std::endl;
-        }
-        else {
-            std::cout << "Warning: '.text' section not found. Displayed RVAs may be PDB offsets or 0 if unable to compute." << std::endl;
-        }
-        std::cout << "----------------------------------------------------------------------------------------------------" << std::endl;
-        std::cout << std::setw(7) << "No." << " | "
-            << std::setw(12) << "RVA (Hex)" << " | "
-            << std::setw(12) << "Offset (Hex)" << " | "
-            << std::setw(10) << "Size" << " | "
-            << "Function Name" << std::endl;
-        std::cout << "----------------------------------------------------------------------------------------------------" << std::endl;
-
-        for (size_t i = 0; i < resolved_functions_list_.size(); ++i) {
-            const auto& func_info = resolved_functions_list_[i];
-            std::cout << std::setw(7) << std::left << i + 1 << " | "
-                << "0x" << std::hex << std::setw(10) << std::left << func_info.rva
-                << " | "
-                << "0x" << std::hex << std::setw(10) << std::left << func_info.pdb_offset
-                << " | "
-                << std::dec << std::setw(10) << std::left << func_info.size
-                << " | "
-                << func_info.name << std::endl;
-        }
-        std::cout << "----------------------------------------------------------------------------------------------------" << std::endl;
+        display_function_table();
 
         std::string input_str;
         while (true) {

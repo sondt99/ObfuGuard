@@ -9,6 +9,8 @@
 #include <set>
 #include <cstdint>
 
+#include <keystone/keystone.h>
+
 // Forward declaration
 namespace LIEF {
     namespace PE {
@@ -43,6 +45,7 @@ private:
 
     std::string get_random_junk_instruction();
     void fill_remaining_space_with_nops(uint64_t address, size_t size);
+    size_t patch_junk_region(ks_engine* ks, uint64_t start_address, size_t region_size, const LIEF::PE::Section& section);
     std::string generate_unique_section_name(const std::string& function_name, int index);
 
 public:
