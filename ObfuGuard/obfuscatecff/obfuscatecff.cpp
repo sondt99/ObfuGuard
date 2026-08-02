@@ -6,10 +6,7 @@
 #include <unordered_set>
 #include <unordered_map>
 
-#define REG_PAIR(zreg, areg) { ZYDIS_REGISTER_##zreg, x86::areg }
-
-ZydisFormatter formatter;
-ZydisDecoder decoder;
+#define REG_PAIR(zreg, areg) { ZYDIS_REGISTER_##zreg, asmjit::x86::areg }
 
 int obfuscatecff::instruction_id = 0;
 int obfuscatecff::function_iterator = 0;
@@ -35,21 +32,19 @@ obfuscatecff::obfuscatecff(pe64* pe)
 		throw std::runtime_error("failed to init formatter");
 }
 
-// Initialize function list from pdbparser with function_t structure
-void obfuscatecff::create_functions(std::vector<pdbparser::sym_func>functions) {
+void obfuscatecff::create_functions(const std::vector<pdbparser::sym_func>& functions) {
 
-	auto text_section = this->pe->get_section(".text"); // find .text section in PE file
+	auto text_section = this->pe->get_section(".text");
 
 	if (!text_section)
 		throw std::runtime_error("couldn't find .text section");
 
-	std::vector<uint32_t>visited_rvas; // list of analyzed RVAs
+	std::unordered_set<uint32_t> visited_rvas;
 
-	// initialize functions in PE file from pdbparser
-	for (auto function : functions) {
-		if (function.obfuscate == false) // skip function if not marked for obfuscation
+	for (const auto& function : functions) {
+		if (!function.obfuscate)
 			continue;
-		if (std::find(visited_rvas.begin(), visited_rvas.end(), function.offset) != visited_rvas.end()) // skip if RVA already analyzed
+		if (visited_rvas.count(function.offset))
 			continue;
 		if (function.size < 5) // skip if function size is too small
 			continue;
@@ -63,7 +58,7 @@ void obfuscatecff::create_functions(std::vector<pdbparser::sym_func>functions) {
 		int current_func_id = function_iterator++;
 		function_t new_function(current_func_id, function.name, function.offset, function.size);
 
-		new_function.ctfflattening = function.ctfflattening;
+		new_function.cff_flattening = function.cff_flattening;
 
 		std::vector <uint64_t> runtime_addresses;
 
@@ -84,7 +79,7 @@ void obfuscatecff::create_functions(std::vector<pdbparser::sym_func>functions) {
 			new_function.inst_id_index[new_instruction.inst_id] = inst_index;
 		}
 
-		visited_rvas.push_back(function.offset); // mark RVA as analyzed
+		visited_rvas.insert(function.offset);
 		this->functions.push_back(new_function); // add new function to the function list
 
 		for (auto runtime_address = runtime_addresses.begin(); runtime_address != runtime_addresses.end(); ++runtime_address) {
@@ -548,7 +543,7 @@ void obfuscatecff::run(PIMAGE_SECTION_HEADER new_section, bool obfuscate_entry_p
 		if (func->has_jumptables)
 			continue;
 
-		if (func->ctfflattening)
+		if (func->cff_flattening)
 			this->apply_control_flow_flattening(func);
 	}
 
@@ -564,7 +559,7 @@ void obfuscatecff::run(PIMAGE_SECTION_HEADER new_section, bool obfuscate_entry_p
 
 }
 
-uint32_t obfuscatecff::get_added_size() { // total memory obfuscated
+uint32_t obfuscatecff::get_added_size() const {
 	return this->total_size_used;
 }
 

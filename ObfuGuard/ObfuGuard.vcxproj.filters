@@ -74,6 +74,9 @@
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="constants.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="pe\pe.h">
       <Filter>Header Files\pe</Filter>
     </ClInclude>

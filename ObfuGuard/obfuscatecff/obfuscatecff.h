@@ -7,14 +7,11 @@
 #include <string>
 #include <unordered_map>
 #include <asmjit/asmjit.h>
-using namespace asmjit;
-
-class obfuscatecff { // Class that performs control flow flattening obfuscation
+class obfuscatecff {
 private:
-    struct instruction_t; // Structure describing a machine instruction
-	struct function_t; // Structure describing a function
-
     pe64* pe;
+    ZydisFormatter formatter;
+    ZydisDecoder decoder;
     struct func_id_instr_id {
         int func_id;
         int inst_index;
@@ -25,12 +22,12 @@ private:
     static int instruction_id;
     static int function_iterator;
 
-    static std::unordered_map<ZydisRegister_, x86::Gp> lookupmap;
+    static std::unordered_map<ZydisRegister_, asmjit::x86::Gp> lookupmap;
 
-    // generate code using asmjit 
-    JitRuntime rt;
-    CodeHolder code;
-    x86::Assembler assm;
+    // generate code using asmjit
+    asmjit::JitRuntime rt;
+    asmjit::CodeHolder code;
+    asmjit::x86::Assembler assm;
 
     std::vector<function_t> functions;
 
@@ -65,11 +62,11 @@ private:
 public:
     obfuscatecff(pe64* pe);
 
-    void create_functions(std::vector<pdbparser::sym_func> functions);
+    void create_functions(const std::vector<pdbparser::sym_func>& functions);
 
     void run(PIMAGE_SECTION_HEADER new_section, bool obfuscate_entry_point);
 
-    uint32_t get_added_size();
+    uint32_t get_added_size() const;
 
     struct instruction_t {
         int inst_id;
@@ -119,11 +116,11 @@ public:
         uint32_t offset;
         uint32_t size;
 
-        function_t(int func_id, std::string name, uint32_t offset, uint32_t size)
+        function_t(int func_id, const std::string& name, uint32_t offset, uint32_t size)
             : func_id(func_id), name(name), offset(offset), size(size) {
         };
 
-        bool ctfflattening = true;
+        bool cff_flattening = true;
         bool has_jumptables = false;
     };
 };
