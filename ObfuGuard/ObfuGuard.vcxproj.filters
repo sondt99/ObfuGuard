@@ -31,6 +31,12 @@
     <Filter Include="Source Files\cfflattening">
       <UniqueIdentifier>{f70b6adc-3166-4ac6-9993-74123ca3bf96}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Source Files\common">
+      <UniqueIdentifier>{d1e2f3a4-5555-6666-7777-888899990001}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\common">
+      <UniqueIdentifier>{d1e2f3a4-5555-6666-7777-888899990002}</UniqueIdentifier>
+    </Filter>
     <Filter Include="Header Files\pe">
       <UniqueIdentifier>{a1b2c3d4-1111-2222-3333-444455556601}</UniqueIdentifier>
     </Filter>
@@ -72,10 +78,25 @@
     <ClCompile Include="cfflattening\cfflattening.cpp">
       <Filter>Source Files\cfflattening</Filter>
     </ClCompile>
+    <ClCompile Include="common\function_discovery.cpp">
+      <Filter>Source Files\common</Filter>
+    </ClCompile>
+    <ClCompile Include="common\function_filter.cpp">
+      <Filter>Source Files\common</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="constants.h">
       <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="common\function_info.h">
+      <Filter>Header Files\common</Filter>
+    </ClInclude>
+    <ClInclude Include="common\function_discovery.h">
+      <Filter>Header Files\common</Filter>
+    </ClInclude>
+    <ClInclude Include="common\function_filter.h">
+      <Filter>Header Files\common</Filter>
     </ClInclude>
     <ClInclude Include="pe\pe.h">
       <Filter>Header Files\pe</Filter>

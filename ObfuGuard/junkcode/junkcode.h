@@ -12,6 +12,8 @@
 
 #include <keystone/keystone.h>
 
+#include "../common/function_info.h"
+
 // Forward declaration
 namespace LIEF {
     namespace PE {
@@ -102,11 +104,13 @@ public:
     // Main interface methods
     static int run_auto_injection_mode(const std::string& input_pe_path,
         const std::string& output_pe_path,
-        bool is_64_bit);
+        bool is_64_bit,
+        const std::vector<ObfuGuard::FunctionInfo>& discovered_functions);
 
     static int run_manual_injection_mode(const std::string& input_pe_path,
         const std::string& output_pe_path,
-        bool is_64_bit);
+        bool is_64_bit,
+        const std::vector<ObfuGuard::FunctionInfo>& discovered_functions);
 
 private:
     // Utility methods moved from main.cpp
