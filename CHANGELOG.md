@@ -3,7 +3,7 @@
 All notable changes to ObfuGuard are documented in this file.
 Format follows [Semantic Versioning](https://semver.org/).
 
-## [4.0.0] - 2025-08-02
+## [4.0.0] - 2026-08-02
 
 ### Added
 - **Symmetric architecture**: shared `common/` module for function discovery
