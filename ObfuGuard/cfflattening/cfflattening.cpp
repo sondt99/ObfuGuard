@@ -1,4 +1,4 @@
-﻿#include "../obfuscatecff/obfuscatecff.h"
+﻿#include "cfflattening.h"
 #include <random>
 #include <vector>
 
@@ -209,6 +209,8 @@ bool obfuscatecff::apply_control_flow_flattening(std::vector<obfuscatecff::funct
 
 			auto dst_block_iter = std::find_if(blocks.begin(), blocks.end(),
 				[&](const basic_block& blk) { return blk.block_id == block_iter->dst_block; });
+
+			if (dst_block_iter == blocks.end()) continue;
 
 			// Create transition for fall-through path (no jump)
 			auto fallthrough_transition = create_dispatcher_transition(next_block_iter->block_id);

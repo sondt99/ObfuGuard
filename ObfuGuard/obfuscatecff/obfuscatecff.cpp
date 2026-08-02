@@ -10,6 +10,8 @@
 
 int obfuscatecff::instruction_id = 0;
 int obfuscatecff::function_iterator = 0;
+ZydisFormatter obfuscatecff::formatter;
+ZydisDecoder obfuscatecff::decoder;
 
 __forceinline int _strcmp(const char* s1, const char* s2)
 {
@@ -679,9 +681,7 @@ void obfuscatecff::instruction_t::print() { // print information of the instruct
 	puts(buffer);
 }
 
-// map between registers and corresponding mnemonics in zydis
-// map between registers and corresponding mnemonics in zydis
-std::unordered_map<ZydisRegister_, x86::Gp> obfuscatecff::lookupmap = {
+std::unordered_map<ZydisRegister_, asmjit::x86::Gp> obfuscatecff::lookupmap = {
 	// 8-bit
 	REG_PAIR(AL, al), REG_PAIR(CL, cl), REG_PAIR(DL, dl), REG_PAIR(BL, bl),
 	REG_PAIR(AH, ah), REG_PAIR(CH, ch), REG_PAIR(DH, dh), REG_PAIR(BH, bh),
