@@ -156,6 +156,8 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="cfflattening\cfflattening.cpp" />
+    <ClCompile Include="common\function_discovery.cpp" />
+    <ClCompile Include="common\function_filter.cpp" />
     <ClCompile Include="func2rva\func2rva.cpp" />
     <ClCompile Include="main.cpp" />
     <ClCompile Include="obfuscatecff\obfuscatecff.cpp" />
@@ -165,6 +167,9 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="constants.h" />
+    <ClInclude Include="common\function_info.h" />
+    <ClInclude Include="common\function_discovery.h" />
+    <ClInclude Include="common\function_filter.h" />
     <ClInclude Include="cfflattening\cfflattening.h" />
     <ClInclude Include="func2rva\func2rva.h" />
     <ClInclude Include="obfuscatecff\obfuscatecff.h" />

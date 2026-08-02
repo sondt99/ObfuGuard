@@ -17,6 +17,8 @@
 #include <keystone/keystone.h>
 
 #include "../func2rva/func2rva.h"
+#include "../common/function_info.h"
+#include "../common/function_filter.h"
 
 // Constructor/Destructor
 TrampolineInjector::TrampolineInjector() : image_base(0), is_64_bit(false), rng_(std::random_device{}()) {
@@ -1330,76 +1332,34 @@ bool JunkCodeManager::filter_functions_by_size(const std::string& input_pe_path,
 // Implement automatic code injection mode
 int JunkCodeManager::run_auto_injection_mode(const std::string& input_pe_path,
     const std::string& output_pe_path,
-    bool is_64_bit) {
+    bool is_64_bit,
+    const std::vector<ObfuGuard::FunctionInfo>& discovered_functions) {
     std::cout << "Running auto-injection mode..." << std::endl;
 
     try {
-        FuncToRVA::RVAResolver resolver(input_pe_path);
-        if (!resolver.initialize()) {
-            std::cerr << "Error: Could not initialize PDB resolver.\n";
-            return 1;
-        }
+        // Filter functions: remove blacklisted and those with size < 6 (i.e. size > 5)
+        std::vector<ObfuGuard::FunctionInfo> filtered = ObfuGuard::filter_functions(discovered_functions, input_pe_path, 6);
 
-        const auto& all_functions = resolver.get_functions_info();
+        // Sort by size descending
+        ObfuGuard::sort_functions_by_size_desc(filtered);
+
+        // Extract RVAs and names into parallel vectors
         std::vector<uint32_t> function_rvas;
         std::vector<std::string> function_names;
+        function_rvas.reserve(filtered.size());
+        function_names.reserve(filtered.size());
 
-        // Filter functions with size greater than 5 bytes and not blacklisted
-        std::vector<std::pair<uint32_t, std::string>> size_sorted_functions;
-        int skipped_count = 0;
-        int skipped_by_binary_size_blacklist = 0;
-
-        // Check if binary is larger than threshold
-        bool is_large_binary = is_binary_large(input_pe_path);
-
-        for (const auto& func_info : all_functions) {
-            if (is_function_blacklisted_by_binary_size(func_info.name, input_pe_path)) {
-                skipped_count++;
-
-                // Check if skipped due to binary size-based blacklist
-                if (is_large_binary_function_dangerous(func_info.name, input_pe_path)) {
-                    skipped_by_binary_size_blacklist++;
-                    /*std::cout << "Skipped large binary function: " << func_info.name
-                        << " (binary size > " << (LARGE_BINARY_SIZE_THRESHOLD / 1024) << "KB)" << std::endl;*/
-                }
-                continue;
-            }
-
-            if (func_info.size > 5) { // Only get functions with size greater than 5 bytes
-                size_sorted_functions.push_back({ func_info.size, func_info.name });
-                // std::cout << func_info.name << std::endl;
-            }
-        }
-
-        // Sort functions by size in descending order
-        std::sort(size_sorted_functions.begin(), size_sorted_functions.end(),
-            [](const std::pair<uint32_t, std::string>& a, const std::pair<uint32_t, std::string>& b) {
-                return a.first > b.first; // Descending by size
-            });
-
-        // Separate sorted functions into RVA and function name lists
-        for (const auto& size_name_pair : size_sorted_functions) {
-            const std::string& func_name = size_name_pair.second;
-
-            // Search for function information to get RVA
-            auto it = std::find_if(all_functions.begin(), all_functions.end(),
-                [&func_name](const FuncToRVA::FunctionInfo& func) {
-                    return func.name == func_name;
-                });
-
-            if (it != all_functions.end()) {
-                function_rvas.push_back(it->rva);
-                function_names.push_back(it->name);
-            }
+        for (const auto& func : filtered) {
+            function_rvas.push_back(func.rva);
+            function_names.push_back(func.name);
         }
 
         if (function_rvas.empty()) {
-            std::cerr << "No functions > 5 bytes found.\n";
+            std::cerr << "No functions > 5 bytes found after filtering.\n";
             return 1;
         }
 
-        std::cout << "\nSkipped " << skipped_by_binary_size_blacklist
-            << " functions due to large binary blacklist." << std::endl;
+        std::cout << "After filtering: " << function_rvas.size() << " function(s) eligible for injection." << std::endl;
 
         // Smart injection with automatic function limit
         uint32_t actual_injected_count = 0;
@@ -1425,83 +1385,69 @@ int JunkCodeManager::run_auto_injection_mode(const std::string& input_pe_path,
 // Implement manual injection mode
 int JunkCodeManager::run_manual_injection_mode(const std::string& input_pe_path,
     const std::string& output_pe_path,
-    bool is_64_bit) {
+    bool is_64_bit,
+    const std::vector<ObfuGuard::FunctionInfo>& discovered_functions) {
     std::cout << "Running manual injection mode..." << std::endl;
 
     try {
         std::vector<uint32_t> function_rvas;
         std::vector<std::string> function_names;
 
-        if (!get_multiple_rvas_interactive(input_pe_path, function_rvas, function_names)) {
+        // Interactive selection from pre-discovered functions
+        if (!ObfuGuard::select_functions_interactive(discovered_functions, function_rvas, function_names)) {
             return 1;
         }
 
-        // Size filtering for manual mode
-        std::vector<uint32_t> filtered_rvas;
-        std::vector<std::string> filtered_names;
-
-        if (!filter_functions_by_size(input_pe_path, function_rvas, function_names,
-            filtered_rvas, filtered_names, 5)) {
-            std::cerr << "Error: Size filtering failed or no functions remain after filtering.\n";
-            return 1;
+        // Filter selected functions by size and blacklist using the discovered list
+        // Build a subset of discovered_functions matching the selected RVAs
+        std::vector<ObfuGuard::FunctionInfo> selected_functions;
+        for (size_t i = 0; i < function_rvas.size(); ++i) {
+            uint32_t rva = function_rvas[i];
+            auto it = std::find_if(discovered_functions.begin(), discovered_functions.end(),
+                [rva](const ObfuGuard::FunctionInfo& f) { return f.rva == rva; });
+            if (it != discovered_functions.end()) {
+                selected_functions.push_back(*it);
+            } else {
+                // Manually entered RVA not in discovered list -- keep it with size 0
+                ObfuGuard::FunctionInfo manual_func;
+                manual_func.name = function_names[i];
+                manual_func.rva = rva;
+                manual_func.pdb_offset = 0;
+                manual_func.size = 0;
+                selected_functions.push_back(manual_func);
+            }
         }
 
-        // Use filtered list instead of original list
-        function_rvas = std::move(filtered_rvas);
-        function_names = std::move(filtered_names);
+        std::vector<ObfuGuard::FunctionInfo> filtered = ObfuGuard::filter_functions(selected_functions, input_pe_path, 5);
+
+        // Extract RVAs and names from filtered list
+        function_rvas.clear();
+        function_names.clear();
+        for (const auto& func : filtered) {
+            function_rvas.push_back(func.rva);
+            function_names.push_back(func.name);
+        }
 
         if (function_rvas.empty()) {
-            std::cerr << "Error: No functions remain after size filtering.\n";
+            std::cerr << "Error: No functions remain after filtering.\n";
             return 1;
         }
 
         std::cout << "Proceeding with " << function_rvas.size() << " function(s) that meet size requirements." << std::endl;
 
-        // Check section limits
-        TrampolineInjector temp_injector;
-        if (!temp_injector.load_pe(input_pe_path)) {
-            std::cerr << "Error: Could not load PE for section analysis.\n";
+        // Use smart injection which handles section limits internally
+        uint32_t actual_injected_count = 0;
+        bool result = TrampolineInjector::inject_trampoline_to_multiple_functions_smart(
+            input_pe_path, output_pe_path, function_rvas, function_names,
+            actual_injected_count);
+
+        if (!result) {
+            std::cerr << "Manual Injection failed!\n";
             return 1;
         }
 
-        if (!temp_injector.check_section_limit_before_injection(static_cast<uint32_t>(function_rvas.size()))) {
-            std::cout << "\nWarning: Selected functions exceed safe section limit." << std::endl;
-            std::cout << "Would you like to proceed with automatic limiting? (y/n): ";
-            std::string proceed_choice;
-            std::getline(std::cin, proceed_choice);
-
-            if (proceed_choice != "y" && proceed_choice != "Y") {
-                std::cout << "Operation cancelled by user." << std::endl;
-                return 1;
-            }
-
-            // Automatic injection with limit
-            uint32_t actual_injected_count = 0;
-            bool result = TrampolineInjector::inject_trampoline_to_multiple_functions_smart(
-                input_pe_path, output_pe_path, function_rvas, function_names,
-                actual_injected_count);
-
-            if (!result) {
-                std::cerr << "Smart Manual Injection failed!\n";
-                return 1;
-            }
-
-            std::cout << "\nSuccessfully injected trampolines into " << actual_injected_count
-                << " function(s) out of " << function_rvas.size() << " selected." << std::endl;
-        }
-        else {
-            // Normal injection - acceptable limit
-            bool result = TrampolineInjector::inject_trampoline_to_multiple_functions(
-                input_pe_path, output_pe_path, function_rvas, function_names);
-
-            if (!result) {
-                std::cerr << "Manual Functions Injection failed!\n";
-                return 1;
-            }
-
-            std::cout << "\nSuccessfully injected trampolines into all " << function_rvas.size()
-                << " selected function(s)." << std::endl;
-        }
+        std::cout << "\nSuccessfully injected trampolines into " << actual_injected_count
+            << " function(s) out of " << function_rvas.size() << " selected." << std::endl;
 
         return 0;
 
