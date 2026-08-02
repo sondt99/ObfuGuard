@@ -8,6 +8,7 @@
 #include <memory>
 #include <set>
 #include <cstdint>
+#include <random>
 
 #include <keystone/keystone.h>
 
@@ -27,9 +28,9 @@ namespace FuncToRVA {
 class TrampolineInjector {
 private:
     std::unique_ptr<LIEF::PE::Binary> binary_ptr;
-    LIEF::PE::Binary* binary;
     uint64_t image_base;
     bool is_64_bit;
+    std::mt19937 rng_;
 
     void print_bytes(const std::string& prefix, const std::vector<uint8_t>& bytes);
 
@@ -52,9 +53,9 @@ public:
     TrampolineInjector();
     ~TrampolineInjector();
 
-    bool load_pe(const std::string& pe_path);
-    bool inject_function_trampoline(uint32_t function_rva);
-    bool save_pe(const std::string& output_path);
+    [[nodiscard]] bool load_pe(const std::string& pe_path);
+    [[nodiscard]] bool inject_function_trampoline(uint32_t function_rva);
+    [[nodiscard]] bool save_pe(const std::string& output_path);
 
     bool inject_multiple_function_trampolines(const std::vector<uint32_t>& function_rvas,
         const std::vector<std::string>& function_names);
@@ -73,28 +74,25 @@ public:
     uint64_t get_image_base() const { return image_base; }
 
     // Static methods
-    static bool inject_trampoline_to_function(
+    [[nodiscard]] static bool inject_trampoline_to_function(
         const std::string& input_pe_path,
         const std::string& output_pe_path,
-        uint32_t function_rva,
-        bool force_64_bit = false
+        uint32_t function_rva
     );
 
-    static bool inject_trampoline_to_multiple_functions(
+    [[nodiscard]] static bool inject_trampoline_to_multiple_functions(
+        const std::string& input_pe_path,
+        const std::string& output_pe_path,
+        const std::vector<uint32_t>& function_rvas,
+        const std::vector<std::string>& function_names
+    );
+
+    [[nodiscard]] static bool inject_trampoline_to_multiple_functions_smart(
         const std::string& input_pe_path,
         const std::string& output_pe_path,
         const std::vector<uint32_t>& function_rvas,
         const std::vector<std::string>& function_names,
-        bool force_64_bit = false
-    );
-
-    static bool inject_trampoline_to_multiple_functions_smart(
-        const std::string& input_pe_path,
-        const std::string& output_pe_path,
-        const std::vector<uint32_t>& function_rvas,
-        const std::vector<std::string>& function_names,
-        uint32_t& actual_injected_count,
-        bool force_64_bit = false
+        uint32_t& actual_injected_count
     );
 };
 

@@ -1,4 +1,5 @@
 ﻿#include "obfuscatecff.h"
+#include "../constants.h"
 #include <iostream>
 #include <bit>
 #include <cstdint>
@@ -8,8 +9,6 @@
 
 #define REG_PAIR(zreg, areg) { ZYDIS_REGISTER_##zreg, asmjit::x86::areg }
 
-int obfuscatecff::instruction_id = 0;
-int obfuscatecff::function_iterator = 0;
 ZydisFormatter obfuscatecff::formatter;
 ZydisDecoder obfuscatecff::decoder;
 
@@ -20,12 +19,12 @@ __forceinline int _strcmp(const char* s1, const char* s2)
 		s1++;
 		s2++;
 	}
-	return *(const unsigned char*)s1 - *(const unsigned char*)s2;
+	return *reinterpret_cast<const unsigned char*>(s1) - *reinterpret_cast<const unsigned char*>(s2);
 }
 
 // Initialize obfuscatecff with pe64 object
-obfuscatecff::obfuscatecff(pe64* pe) 
-    : total_size_used(0) // initialize total_size_used to 0
+obfuscatecff::obfuscatecff(pe64* pe)
+    : instruction_id(0), function_iterator(0), total_size_used(0) // initialize members to 0
 {
 	this->pe = pe;
 	if (!ZYAN_SUCCESS(ZydisDecoderInit(&decoder, ZYDIS_MACHINE_MODE_LONG_64, ZYDIS_STACK_WIDTH_64)))
@@ -64,10 +63,10 @@ void obfuscatecff::create_functions(const std::vector<pdbparser::sym_func>& func
 
 		std::vector <uint64_t> runtime_addresses;
 
-		while (ZYAN_SUCCESS(ZydisDisassembleIntel(ZYDIS_MACHINE_MODE_LONG_64, (ZyanU64)(address_to_analyze + offset), (const void*)(address_to_analyze + offset), function.size - offset, &zyinstruction))) {
+		while (ZYAN_SUCCESS(ZydisDisassembleIntel(ZYDIS_MACHINE_MODE_LONG_64, reinterpret_cast<ZyanU64>(address_to_analyze + offset), reinterpret_cast<const void*>(address_to_analyze + offset), function.size - offset, &zyinstruction))) {
 
 			instruction_t new_instruction{};
-			new_instruction.runtime_address = (uint64_t)address_to_analyze + offset;
+			new_instruction.runtime_address = reinterpret_cast<uint64_t>(address_to_analyze + offset);
 			new_instruction.load(current_func_id, zyinstruction, new_instruction.runtime_address);
 			if (offset == 0)
 				new_instruction.is_first_instruction = true;
@@ -92,16 +91,19 @@ void obfuscatecff::create_functions(const std::vector<pdbparser::sym_func>& func
 }
 
 // Use safebuffers to ensure buffer safety when jumping to the patched entrypoint
-__declspec(safebuffers) int obfuscatecff::custom_main(int argc, char* argv[]) {
+#ifdef _MSC_VER
+__declspec(safebuffers)
+#endif
+int obfuscatecff::custom_main(int argc, char* argv[]) {
 	// Get PEB address through GS register
 	uint64_t peb_address = __readgsqword(0x60);
 
 	// Get base address of the process from PEB
-	uint64_t module_base = *(uint64_t*)(peb_address + 0x10);
+	uint64_t module_base = *reinterpret_cast<uint64_t*>(peb_address + 0x10);
 
 	// Get pointer to NT Headers
-	auto dos_header = (PIMAGE_DOS_HEADER)module_base;
-	auto nt_headers = (PIMAGE_NT_HEADERS)(module_base + dos_header->e_lfanew);
+	auto dos_header = reinterpret_cast<PIMAGE_DOS_HEADER>(module_base);
+	auto nt_headers = reinterpret_cast<PIMAGE_NT_HEADERS>(module_base + dos_header->e_lfanew);
 
 	// Find section with name ".0Dev"
 	PIMAGE_SECTION_HEADER target_section = nullptr;
@@ -110,7 +112,7 @@ __declspec(safebuffers) int obfuscatecff::custom_main(int argc, char* argv[]) {
 	const char target_name[] = ".0Dev";
 
 	for (int i = 0; i < nt_headers->FileHeader.NumberOfSections; ++i) {
-		if (strncmp((char*)section_headers[i].Name, target_name, sizeof(section_headers[i].Name)) == 0) {
+		if (strncmp(reinterpret_cast<char*>(section_headers[i].Name), target_name, sizeof(section_headers[i].Name)) == 0) {
 			target_section = &section_headers[i];
 			break;
 		}
@@ -121,7 +123,7 @@ __declspec(safebuffers) int obfuscatecff::custom_main(int argc, char* argv[]) {
 	}
 
 	// Get encoded entrypoint from section ".0Dev"
-	uint32_t encoded_entry = *(uint32_t*)(module_base + target_section->VirtualAddress);
+	uint32_t encoded_entry = *reinterpret_cast<uint32_t*>(module_base + target_section->VirtualAddress);
 
 	// Decode entrypoint
 	encoded_entry ^= nt_headers->OptionalHeader.SizeOfStackCommit;
@@ -163,11 +165,11 @@ void obfuscatecff::remove_jumptables() {
 			if (instr.has_relative && !instr.isjmpcall && instr.relative.size == 32) {
 
 				// Calculate the actual address that this instruction references
-				int32_t rel_offset = *(int32_t*)(&instr.raw_bytes[instr.relative.offset]);
+				int32_t rel_offset = *reinterpret_cast<int32_t*>(&instr.raw_bytes[instr.relative.offset]);
 				uint64_t resolved_address = instr.runtime_address + rel_offset + instr.zyinstr.info.length;
 
 				// If address points to beginning of file buffer, mark this function as having jumptable
-				if (resolved_address == (uint64_t)this->pe->get_buffer()->data()) {
+				if (resolved_address == reinterpret_cast<uint64_t>(this->pe->get_buffer()->data())) {
 					func.has_jumptables = true;
 					break; // No need to check more instructions in this function
 				}
@@ -191,7 +193,7 @@ bool obfuscatecff::analyze_functions() {
 
 						uint64_t absolute_address = 0;
 
-						if (!ZYAN_SUCCESS(ZydisCalcAbsoluteAddress(&instruction->zyinstr.info, &instruction->zyinstr.operands[0], instruction->runtime_address, (ZyanU64*)&absolute_address)))
+						if (!ZYAN_SUCCESS(ZydisCalcAbsoluteAddress(&instruction->zyinstr.info, &instruction->zyinstr.operands[0], instruction->runtime_address, reinterpret_cast<ZyanU64*>(&absolute_address))))
 							return false;
 
 						obfuscatecff::instruction_t* instptr;
@@ -211,13 +213,13 @@ bool obfuscatecff::analyze_functions() {
 
 						switch (instruction->relative.size) {
 						case 8:
-							original_data += *(int8_t*)(&instruction->raw_bytes.data()[instruction->relative.offset]);
+							original_data += *reinterpret_cast<int8_t*>(&instruction->raw_bytes.data()[instruction->relative.offset]);
 							break;
 						case 16:
-							original_data += *(int16_t*)(&instruction->raw_bytes.data()[instruction->relative.offset]);
+							original_data += *reinterpret_cast<int16_t*>(&instruction->raw_bytes.data()[instruction->relative.offset]);
 							break;
 						case 32:
-							original_data += *(int32_t*)(&instruction->raw_bytes.data()[instruction->relative.offset]);
+							original_data += *reinterpret_cast<int32_t*>(&instruction->raw_bytes.data()[instruction->relative.offset]);
 							break;
 						}
 						instruction->location_of_data = original_data;
@@ -232,7 +234,7 @@ bool obfuscatecff::analyze_functions() {
 
 // relocate code segment in section
 void obfuscatecff::relocate(PIMAGE_SECTION_HEADER new_section) {
-	auto base = pe->get_buffer()->data() + 0x1000;
+	auto base = pe->get_buffer()->data() + ObfuGuard::PE_SECTION_ALIGNMENT;
 	int used_memory = 0;
 	for (auto func = functions.begin(); func != functions.end(); ++func) { // iterate through each function in the list
 		if (func->has_jumptables)
@@ -241,29 +243,25 @@ void obfuscatecff::relocate(PIMAGE_SECTION_HEADER new_section) {
 		int instr_ctr = 0;
 		for (auto instruction = func->instructions.begin(); instruction != func->instructions.end(); ++instruction) {
 			// update relocated_address of instruction
-			instruction->relocated_address = (uint64_t)base + dst + instr_ctr;
+			instruction->relocated_address = reinterpret_cast<uint64_t>(base) + dst + instr_ctr;
 			instr_ctr += instruction->zyinstr.info.length;
 		}
 		used_memory += instr_ctr;
 	}
-	this->total_size_used = used_memory + 0x1000;
+	this->total_size_used = used_memory + ObfuGuard::PE_SECTION_ALIGNMENT;
 }
 
 // find instruction based on instruction id and function id
-bool obfuscatecff::find_instruction_by_id(int funcid, int instid, instruction_t* inst) {
+bool obfuscatecff::find_instruction_by_id(int funcid, int instid, instruction_t* inst) const {
 
 	auto func = std::find_if(this->functions.begin(), this->functions.end(), [&](const obfuscatecff::function_t& func) {
 		return func.func_id == funcid;
 		});
 	if (func == this->functions.end())
 		return false;
-	auto it = std::find_if(func->instructions.begin(), func->instructions.end(), [&](const obfuscatecff::instruction_t& inst) {
-		return inst.inst_id == instid;
-		});
-
-	if (it != func->instructions.end())
-	{
-		*inst = *it;
+	auto idx_it = func->inst_id_index.find(instid);
+	if (idx_it != func->inst_id_index.end()) {
+		*inst = func->instructions[idx_it->second];
 		return true;
 	}
 	return false;
@@ -295,7 +293,9 @@ uint16_t rel8_to16(ZydisMnemonic mnemonic) {
 }
 
 // fix jump instructions by relative address
-bool obfuscatecff::fix_relative_jmps(function_t* func) {
+bool obfuscatecff::fix_relative_jmps(function_t* func, int depth) {
+
+	if (depth > 100) return false;
 
 	for (auto instruction_iter = func->instructions.begin(); instruction_iter != func->instructions.end(); instruction_iter++) {
 
@@ -317,8 +317,8 @@ bool obfuscatecff::fix_relative_jmps(function_t* func) {
 
 
 						instruction_iter->raw_bytes.resize(5);
-						*(uint8_t*)(instruction_iter->raw_bytes.data()) = 0xE9;
-						*(int32_t*)(&instruction_iter->raw_bytes.data()[1]) = (int32_t)(inst.relocated_address - instruction_iter->relocated_address - instruction_iter->zyinstr.info.length);
+						*reinterpret_cast<uint8_t*>(instruction_iter->raw_bytes.data()) = 0xE9;
+						*reinterpret_cast<int32_t*>(&instruction_iter->raw_bytes.data()[1]) = static_cast<int32_t>(inst.relocated_address - instruction_iter->relocated_address - instruction_iter->zyinstr.info.length);
 
 						instruction_iter->reload();
 
@@ -326,15 +326,15 @@ bool obfuscatecff::fix_relative_jmps(function_t* func) {
 							instruction_iter2->relocated_address += 3;
 						}
 
-						return this->fix_relative_jmps(func);
+						return this->fix_relative_jmps(func, depth + 1);
 
 					}
 					else {
 
 						uint16_t new_opcode = rel8_to16(instruction_iter->zyinstr.info.mnemonic);
 						instruction_iter->raw_bytes.resize(6);
-						*(uint16_t*)(instruction_iter->raw_bytes.data()) = new_opcode;
-						*(int32_t*)(&instruction_iter->raw_bytes.data()[2]) = (int32_t)(inst.relocated_address - instruction_iter->relocated_address - instruction_iter->zyinstr.info.length);
+						*reinterpret_cast<uint16_t*>(instruction_iter->raw_bytes.data()) = new_opcode;
+						*reinterpret_cast<int32_t*>(&instruction_iter->raw_bytes.data()[2]) = static_cast<int32_t>(inst.relocated_address - instruction_iter->relocated_address - instruction_iter->zyinstr.info.length);
 
 						instruction_iter->reload();
 
@@ -342,7 +342,7 @@ bool obfuscatecff::fix_relative_jmps(function_t* func) {
 							instruction2->relocated_address += 4;
 						}
 
-						return this->fix_relative_jmps(func);
+						return this->fix_relative_jmps(func, depth + 1);
 					}
 
 				}
@@ -359,7 +359,7 @@ bool obfuscatecff::fix_relative_jmps(function_t* func) {
 				break;
 			}
 			case 32: {
-				int64_t distance = (int64_t)inst.relocated_address - (int64_t)instruction_iter->relocated_address - (int64_t)instruction_iter->zyinstr.info.length;
+				int64_t distance = static_cast<int64_t>(inst.relocated_address) - static_cast<int64_t>(instruction_iter->relocated_address) - static_cast<int64_t>(instruction_iter->zyinstr.info.length);
 				if (distance > INT32_MAX || distance < INT32_MIN)
 				{
 
@@ -410,25 +410,25 @@ bool obfuscatecff::apply_relocations(PIMAGE_SECTION_HEADER new_section) {
 
 						switch (instruction_ptr->relative.size) {
 						case 8: {
-							uint64_t dst = instruction_ptr->runtime_address + *(int8_t*)(&instruction_ptr->raw_bytes.data()[instruction_ptr->relative.offset]) + instruction_ptr->zyinstr.info.length;
-							*(int8_t*)(&instruction_ptr->raw_bytes.data()[instruction_ptr->relative.offset]) = (int8_t)(dst - instruction_ptr->relocated_address - instruction_ptr->zyinstr.info.length);
+							uint64_t dst = instruction_ptr->runtime_address + *reinterpret_cast<int8_t*>(&instruction_ptr->raw_bytes.data()[instruction_ptr->relative.offset]) + instruction_ptr->zyinstr.info.length;
+							*reinterpret_cast<int8_t*>(&instruction_ptr->raw_bytes.data()[instruction_ptr->relative.offset]) = static_cast<int8_t>(dst - instruction_ptr->relocated_address - instruction_ptr->zyinstr.info.length);
 							break;
 						}
 						case 16: {
-							uint64_t dst = instruction_ptr->runtime_address + *(int16_t*)(&instruction_ptr->raw_bytes.data()[instruction_ptr->relative.offset]) + instruction_ptr->zyinstr.info.length;
-							*(int16_t*)(&instruction_ptr->raw_bytes.data()[instruction_ptr->relative.offset]) = (int16_t)(dst - instruction_ptr->relocated_address - instruction_ptr->zyinstr.info.length);
+							uint64_t dst = instruction_ptr->runtime_address + *reinterpret_cast<int16_t*>(&instruction_ptr->raw_bytes.data()[instruction_ptr->relative.offset]) + instruction_ptr->zyinstr.info.length;
+							*reinterpret_cast<int16_t*>(&instruction_ptr->raw_bytes.data()[instruction_ptr->relative.offset]) = static_cast<int16_t>(dst - instruction_ptr->relocated_address - instruction_ptr->zyinstr.info.length);
 							break;
 						}
 						case 32: {
-							uint64_t dst = instruction_ptr->runtime_address + *(int32_t*)(&instruction_ptr->raw_bytes.data()[instruction_ptr->relative.offset]) + instruction_ptr->zyinstr.info.length;
-							*(int32_t*)(&instruction_ptr->raw_bytes.data()[instruction_ptr->relative.offset]) = (int32_t)(dst - instruction_ptr->relocated_address - instruction_ptr->zyinstr.info.length);
+							uint64_t dst = instruction_ptr->runtime_address + *reinterpret_cast<int32_t*>(&instruction_ptr->raw_bytes.data()[instruction_ptr->relative.offset]) + instruction_ptr->zyinstr.info.length;
+							*reinterpret_cast<int32_t*>(&instruction_ptr->raw_bytes.data()[instruction_ptr->relative.offset]) = static_cast<int32_t>(dst - instruction_ptr->relocated_address - instruction_ptr->zyinstr.info.length);
 							break;
 						}
 						default:
 							return false;
 						}
 
-						memcpy((void*)instruction_ptr->relocated_address, instruction_ptr->raw_bytes.data(), instruction_ptr->zyinstr.info.length);
+						memcpy(reinterpret_cast<void*>(instruction_ptr->relocated_address), instruction_ptr->raw_bytes.data(), instruction_ptr->zyinstr.info.length);
 					}
 					else {
 
@@ -439,24 +439,24 @@ bool obfuscatecff::apply_relocations(PIMAGE_SECTION_HEADER new_section) {
 
 						switch (instruction_ptr->relative.size) {
 						case 8: {
-							*(int8_t*)(&instruction_ptr->raw_bytes.data()[instruction_ptr->relative.offset]) = (int8_t)(inst.relocated_address - instruction_ptr->relocated_address - instruction_ptr->zyinstr.info.length);
+							*reinterpret_cast<int8_t*>(&instruction_ptr->raw_bytes.data()[instruction_ptr->relative.offset]) = static_cast<int8_t>(inst.relocated_address - instruction_ptr->relocated_address - instruction_ptr->zyinstr.info.length);
 							break;
 						}
 						case 16:
-							*(int16_t*)(&instruction_ptr->raw_bytes.data()[instruction_ptr->relative.offset]) = (int16_t)(inst.relocated_address - instruction_ptr->relocated_address - instruction_ptr->zyinstr.info.length);
+							*reinterpret_cast<int16_t*>(&instruction_ptr->raw_bytes.data()[instruction_ptr->relative.offset]) = static_cast<int16_t>(inst.relocated_address - instruction_ptr->relocated_address - instruction_ptr->zyinstr.info.length);
 							break;
 						case 32: {
 							if (inst.is_first_instruction)
-								*(int32_t*)(&instruction_ptr->raw_bytes.data()[instruction_ptr->relative.offset]) = (int32_t)(inst.runtime_address - instruction_ptr->relocated_address - instruction_ptr->zyinstr.info.length);
+								*reinterpret_cast<int32_t*>(&instruction_ptr->raw_bytes.data()[instruction_ptr->relative.offset]) = static_cast<int32_t>(inst.runtime_address - instruction_ptr->relocated_address - instruction_ptr->zyinstr.info.length);
 							else
-								*(int32_t*)(&instruction_ptr->raw_bytes.data()[instruction_ptr->relative.offset]) = (int32_t)(inst.relocated_address - instruction_ptr->relocated_address - instruction_ptr->zyinstr.info.length);
+								*reinterpret_cast<int32_t*>(&instruction_ptr->raw_bytes.data()[instruction_ptr->relative.offset]) = static_cast<int32_t>(inst.relocated_address - instruction_ptr->relocated_address - instruction_ptr->zyinstr.info.length);
 							break;
 						}
 						default:
 							return false;
 						}
 
-						memcpy((void*)instruction_ptr->relocated_address, instruction_ptr->raw_bytes.data(), instruction_ptr->zyinstr.info.length);
+						memcpy(reinterpret_cast<void*>(instruction_ptr->relocated_address), instruction_ptr->raw_bytes.data(), instruction_ptr->zyinstr.info.length);
 					}
 
 				}
@@ -465,27 +465,27 @@ bool obfuscatecff::apply_relocations(PIMAGE_SECTION_HEADER new_section) {
 					uint64_t dst = instruction_ptr->location_of_data;
 					switch (instruction_ptr->relative.size) {
 					case 8: {
-						*(int8_t*)(&instruction_ptr->raw_bytes.data()[instruction_ptr->relative.offset]) = (int8_t)(dst - instruction_ptr->relocated_address - instruction_ptr->zyinstr.info.length);
+						*reinterpret_cast<int8_t*>(&instruction_ptr->raw_bytes.data()[instruction_ptr->relative.offset]) = static_cast<int8_t>(dst - instruction_ptr->relocated_address - instruction_ptr->zyinstr.info.length);
 						break;
 					}
 					case 16: {
-						*(int16_t*)(&instruction_ptr->raw_bytes.data()[instruction_ptr->relative.offset]) = (int16_t)(dst - instruction_ptr->relocated_address - instruction_ptr->zyinstr.info.length);
+						*reinterpret_cast<int16_t*>(&instruction_ptr->raw_bytes.data()[instruction_ptr->relative.offset]) = static_cast<int16_t>(dst - instruction_ptr->relocated_address - instruction_ptr->zyinstr.info.length);
 						break;
 					}
 					case 32: {
-						*(int32_t*)(&instruction_ptr->raw_bytes.data()[instruction_ptr->relative.offset]) = (int32_t)(dst - instruction_ptr->relocated_address - instruction_ptr->zyinstr.info.length);
+						*reinterpret_cast<int32_t*>(&instruction_ptr->raw_bytes.data()[instruction_ptr->relative.offset]) = static_cast<int32_t>(dst - instruction_ptr->relocated_address - instruction_ptr->zyinstr.info.length);
 						break;
 					}
 					default:
 						return false;
 					}
 
-					memcpy((void*)instruction_ptr->relocated_address, instruction_ptr->raw_bytes.data(), instruction_ptr->zyinstr.info.length);
+					memcpy(reinterpret_cast<void*>(instruction_ptr->relocated_address), instruction_ptr->raw_bytes.data(), instruction_ptr->zyinstr.info.length);
 				}
 
 			}
 			else {
-				memcpy((void*)instruction_ptr->relocated_address, instruction_ptr->raw_bytes.data(), instruction_ptr->zyinstr.info.length);
+				memcpy(reinterpret_cast<void*>(instruction_ptr->relocated_address), instruction_ptr->raw_bytes.data(), instruction_ptr->zyinstr.info.length);
 			}
 
 		}
@@ -516,16 +516,16 @@ void obfuscatecff::compile(PIMAGE_SECTION_HEADER new_section) {
 
 		if (func->offset != -1) {
 			uint32_t src = text_section->VirtualAddress + func->offset;
-			uint32_t dst = first_instruction->relocated_address - (uint64_t)pe->get_buffer()->data();
+			uint32_t dst = first_instruction->relocated_address - reinterpret_cast<uint64_t>(pe->get_buffer()->data());
 
 
-			*(int32_t*)&jmp_shell[1] = (signed int)(dst - src - sizeof(jmp_shell));
+			*reinterpret_cast<int32_t*>(&jmp_shell[1]) = static_cast<signed int>(dst - src - sizeof(jmp_shell));
 
 			for (int i = 0; i < func->size - 5; i++) {
-				*(uint8_t*)((uint64_t)base + src + 5 + i) = rand() % 255 + 1;
+				*reinterpret_cast<uint8_t*>(reinterpret_cast<uint64_t>(base) + src + 5 + i) = rand() % 255 + 1;
 			}
 
-			memcpy((void*)(base + src), jmp_shell, sizeof(jmp_shell));
+			memcpy(reinterpret_cast<void*>(base + src), jmp_shell, sizeof(jmp_shell));
 		}
 	}
 
@@ -536,7 +536,7 @@ void obfuscatecff::run(PIMAGE_SECTION_HEADER new_section, bool obfuscate_entry_p
 	if (!this->analyze_functions())
 		throw std::runtime_error("Error when analyzing function");
 
-	*(uint32_t*)(pe->get_buffer()->data() + new_section->VirtualAddress) = _rotl(pe->get_nt()->OptionalHeader.AddressOfEntryPoint, pe->get_nt()->FileHeader.TimeDateStamp) ^ pe->get_nt()->OptionalHeader.SizeOfStackCommit;
+	*reinterpret_cast<uint32_t*>(pe->get_buffer()->data() + new_section->VirtualAddress) = _rotl(pe->get_nt()->OptionalHeader.AddressOfEntryPoint, pe->get_nt()->FileHeader.TimeDateStamp) ^ pe->get_nt()->OptionalHeader.SizeOfStackCommit;
 
 	code.init(rt.environment());
 	code.attach(&this->assm);
@@ -571,10 +571,10 @@ std::vector<obfuscatecff::instruction_t>obfuscatecff::instructions_from_jit(uint
 
 	uint32_t offset = 0;
 	ZydisDisassembledInstruction zyinstruction{};
-	while (ZYAN_SUCCESS(ZydisDisassembleIntel(ZYDIS_MACHINE_MODE_LONG_64, (ZyanU64)(code + offset), (const void*)(code + offset), size - offset, &zyinstruction))) {
+	while (ZYAN_SUCCESS(ZydisDisassembleIntel(ZYDIS_MACHINE_MODE_LONG_64, reinterpret_cast<ZyanU64>(code + offset), reinterpret_cast<const void*>(code + offset), size - offset, &zyinstruction))) {
 
 		instruction_t new_instruction{};
-		new_instruction.load(-1, zyinstruction, (uint64_t)(code + offset));
+		new_instruction.load(-1, zyinstruction, reinterpret_cast<uint64_t>(code + offset));
 		instr.push_back(new_instruction);
 		offset += new_instruction.zyinstr.info.length;
 	}
@@ -653,9 +653,9 @@ void obfuscatecff::instruction_t::load_relative_info() { // get information abou
 }
 
 
-void obfuscatecff::instruction_t::load(int funcid, std::vector<uint8_t>raw_data) { // load instruction from raw_data and funcid
+void obfuscatecff::instruction_t::load(int funcid, const std::vector<uint8_t>& raw_data) { // load instruction from raw_data and funcid
 	this->inst_id = instruction_id++;
-	ZydisDisassembleIntel(ZYDIS_MACHINE_MODE_LONG_64, (ZyanU64)raw_data.data(), (const void*)(raw_data.data()), raw_data.size(), &this->zyinstr);
+	ZydisDisassembleIntel(ZYDIS_MACHINE_MODE_LONG_64, reinterpret_cast<ZyanU64>(raw_data.data()), reinterpret_cast<const void*>(raw_data.data()), raw_data.size(), &this->zyinstr);
 	this->func_id = funcid;
 	this->raw_bytes = raw_data;
 	this->load_relative_info();
@@ -665,12 +665,12 @@ void obfuscatecff::instruction_t::load(int funcid, ZydisDisassembledInstruction 
 	this->inst_id = instruction_id++;
 	this->zyinstr = zyinstruction;
 	this->func_id = funcid;
-	this->raw_bytes.resize(this->zyinstr.info.length); memcpy(this->raw_bytes.data(), (void*)runtime_address, this->zyinstr.info.length);
+	this->raw_bytes.resize(this->zyinstr.info.length); memcpy(this->raw_bytes.data(), reinterpret_cast<void*>(runtime_address), this->zyinstr.info.length);
 	this->load_relative_info();
 }
 
 void obfuscatecff::instruction_t::reload() { // reload instruction from raw_bytes, used when modifying raw_bytes
-	ZydisDisassembleIntel(ZYDIS_MACHINE_MODE_LONG_64, (ZyanU64)this->raw_bytes.data(), (const void*)this->raw_bytes.data(), this->raw_bytes.size(), &this->zyinstr);
+	ZydisDisassembleIntel(ZYDIS_MACHINE_MODE_LONG_64, reinterpret_cast<ZyanU64>(this->raw_bytes.data()), reinterpret_cast<const void*>(this->raw_bytes.data()), this->raw_bytes.size(), &this->zyinstr);
 	this->load_relative_info();
 }
 

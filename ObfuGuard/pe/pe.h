@@ -14,7 +14,7 @@ public:
 
 	pe64(std::string binary_path);
 
-	uint32_t align(uint32_t address, uint32_t alignment);
+	uint32_t align(uint32_t address, uint32_t alignment) const;
 
 	std::vector<uint8_t>* get_buffer();
 
@@ -28,5 +28,5 @@ public:
 
 	void save_to_disk(std::string path, PIMAGE_SECTION_HEADER new_section, uint32_t total_size);
 
-	std::string get_path();
+	std::string get_path() const;
 };

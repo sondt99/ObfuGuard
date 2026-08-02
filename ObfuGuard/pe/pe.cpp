@@ -1,4 +1,5 @@
 #include "pe.h"
+#include "../constants.h"
 
 #include <filesystem>
 #include <fstream>
@@ -41,8 +42,7 @@ pe64::pe64(std::string binary_path) {
 	if(nt->FileHeader.Machine != IMAGE_FILE_MACHINE_AMD64)
 		throw std::runtime_error("ObfuGuard doesn't support 32bit binaries!");
 
-	constexpr uint32_t MAX_IMAGE_SIZE = 512 * 1024 * 1024; // 512 MB
-	if (nt->OptionalHeader.SizeOfImage > MAX_IMAGE_SIZE)
+	if (nt->OptionalHeader.SizeOfImage > ObfuGuard::MAX_PE_IMAGE_SIZE)
 		throw std::runtime_error("PE SizeOfImage exceeds maximum allowed size!");
 
 	this->buffer.resize(nt->OptionalHeader.SizeOfImage);
@@ -95,7 +95,7 @@ PIMAGE_SECTION_HEADER pe64::get_section(std::string sectionname) {
 	return nullptr;
 }
 
-uint32_t pe64::align(uint32_t address, uint32_t alignment) {
+uint32_t pe64::align(uint32_t address, uint32_t alignment) const {
 	if (alignment == 0)
 		return address;
 	uint32_t remainder = address % alignment;
@@ -164,6 +164,6 @@ void pe64::save_to_disk(std::string path, PIMAGE_SECTION_HEADER new_section, uin
 	}
 }
 
-std::string pe64::get_path() {
+std::string pe64::get_path() const {
 	return this->path;
 }

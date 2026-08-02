@@ -19,8 +19,8 @@ private:
     // map tracking runtime address -> instruction
     std::map<uint64_t, func_id_instr_id> runtime_addr_track;
 
-    static int instruction_id;
-    static int function_iterator;
+    int instruction_id = 0;
+    int function_iterator = 0;
 
     static std::unordered_map<ZydisRegister_, asmjit::x86::Gp> lookupmap;
 
@@ -41,9 +41,9 @@ private:
 
     void relocate(PIMAGE_SECTION_HEADER new_section);
 
-    bool find_instruction_by_id(int funcid, int instid, instruction_t* inst);
+    bool find_instruction_by_id(int funcid, int instid, instruction_t* inst) const;
 
-    bool fix_relative_jmps(function_t* func);
+    bool fix_relative_jmps(function_t* func, int depth = 0);
 
     bool convert_relative_jmps();
 
@@ -57,7 +57,10 @@ private:
     // Apply control flow flattening technique to a function
     bool apply_control_flow_flattening(std::vector<obfuscatecff::function_t>::iterator& func_iter);
 
-    __declspec(safebuffers) int custom_main(int argc, char* argv[]);
+#ifdef _MSC_VER
+    __declspec(safebuffers)
+#endif
+    int custom_main(int argc, char* argv[]);
 
 public:
     obfuscatecff(pe64* pe);
@@ -102,7 +105,7 @@ public:
         }
 
         void load_relative_info(); // Get relative jump information from Zydis instruction
-        void load(int funcid, std::vector<uint8_t> raw_data); // Load from raw bytes
+        void load(int funcid, const std::vector<uint8_t>& raw_data); // Load from raw bytes
         void load(int funcid, ZydisDisassembledInstruction zyinstruction, uint64_t runtime_address);
         void reload();
         void print();
