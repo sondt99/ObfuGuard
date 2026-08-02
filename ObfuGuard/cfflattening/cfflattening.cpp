@@ -111,7 +111,7 @@ bool obfuscatecff::apply_control_flow_flattening(std::vector<obfuscatecff::funct
 	// perform flow restructuring with dispatcher through comparison with rax state variable
 	instruction_t push_rax{}; push_rax.load(func->func_id, { 0x50 });
 	push_rax.inst_id = first_inst_id;
-	push_rax.is_first_instruction = false;
+	push_rax.is_first_instruction = true;
 	auto it = func->instructions.insert(func->instructions.begin(), push_rax);
 	instruction_t push_f{}; push_f.load(func->func_id, { 0x66, 0x9C });
 	it = func->instructions.insert(it + 1, push_f);
@@ -195,6 +195,8 @@ bool obfuscatecff::apply_control_flow_flattening(std::vector<obfuscatecff::funct
 			[&](const obfuscatecff::instruction_t& inst) {
 				return inst.inst_id == (block_iter->instructions.end() - 1)->inst_id;
 			});
+
+		if (last_inst == func->instructions.end()) continue;
 
 		// Find the next block in the execution chain
 		auto next_block_iter = std::find_if(blocks.begin(), blocks.end(),

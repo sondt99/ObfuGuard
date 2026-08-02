@@ -164,6 +164,7 @@
     <ClCompile Include="junkcode\junkcode.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="constants.h" />
     <ClInclude Include="cfflattening\cfflattening.h" />
     <ClInclude Include="func2rva\func2rva.h" />
     <ClInclude Include="obfuscatecff\obfuscatecff.h" />

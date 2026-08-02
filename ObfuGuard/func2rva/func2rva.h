@@ -47,6 +47,7 @@ namespace FuncToRVA {
         bool has_text_section_for_reference_ = false;   // Flag indicating if .text section exists
 
         bool load_pe_and_parse_pdb();
+        void display_function_table() const;
     };
 
     // Display function list from PE file and allow user to select one function, returns RVA of that function.

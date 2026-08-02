@@ -212,16 +212,18 @@ bool TrampolineInjector::get_and_relocate_original_function_code(
                                     << ", New rel offset: 0x" << new_relative_offset << std::dec << std::endl;*/
                             }
                             else {
-                                std::cout << "";
-                                /*std::cerr << "Error: Cannot relocate " << (insn[0].bytes[0] == 0xE8 ? "CALL" : "JMP")
+                                std::cerr << "Warning: Cannot relocate " << (insn[0].bytes[0] == 0xE8 ? "CALL" : "JMP")
                                     << " at VA 0x" << std::hex << old_instr_va
-                                    << " - target too far (offset: 0x" << new_relative_offset_64 << ")" << std::dec << std::endl;*/
+                                    << " - relative offset 0x" << new_relative_offset_64
+                                    << " exceeds INT32 range. Skipping relocation for this instruction."
+                                    << std::dec << std::endl;
+                                // Skip relocation: keep original bytes to avoid crash from wrong offset
+                                std::vector<uint8_t> original_instr_bytes(insn[0].bytes, insn[0].bytes + insn[0].size);
+                                instr_bytes = original_instr_bytes;
                             }
                         }
                         else if (insn[0].bytes[0] == 0xFF) {
-                            std::cout << "";
-                            /*std::cout << "Warning: Indirect CALL/JMP at VA 0x" << std::hex << insn[0].address
-                                << " - may need manual verification" << std::dec << std::endl;*/
+                            // Indirect CALL/JMP -- no relocation needed
                         }
                     }
                     else if (op->type == X86_OP_MEM && is_64_bit) {
@@ -324,114 +326,109 @@ bool TrampolineInjector::create_new_section(const std::string& section_name, uin
 
 // Create ASM instruction sequence that doesn't affect logic (junk) to insert into code
 std::string TrampolineInjector::get_random_junk_instruction() {
-    std::vector<std::string> junk_instructions;
+    static const std::vector<std::string> junk_64bit = {
+        // Basic no-op equivalents
+        "mov rax, rax",
+        "mov rbx, rbx",
+        "mov rcx, rcx",
+        "mov rdx, rdx",
 
-    if (is_64_bit) {
-        junk_instructions = {
-            // Basic no-op equivalents
-            "mov rax, rax",
-            "mov rbx, rbx",
-            "mov rcx, rcx",
-            "mov rdx, rdx",
+        // Self-canceling operation pairs
+        "add r8, 0x10; sub r8, 0x10",
+        "add r9, 0x20; sub r9, 0x20",
+        "add r10, 0x30; sub r10, 0x30",
+        "add r11, 0x40; sub r11, 0x40",
+        "add r12, 0x50; sub r12, 0x50",
+        "add r13, 0x60; sub r13, 0x60",
+        "add r14, 0x70; sub r14, 0x70",
+        "add r15, 0x80; sub r15, 0x80",
 
-            // Self-canceling operation pairs
-            "add r8, 0x10; sub r8, 0x10",
-            "add r9, 0x20; sub r9, 0x20",
-            "add r10, 0x30; sub r10, 0x30",
-            "add r11, 0x40; sub r11, 0x40",
-            "add r12, 0x50; sub r12, 0x50",
-            "add r13, 0x60; sub r13, 0x60",
-            "add r14, 0x70; sub r14, 0x70",
-            "add r15, 0x80; sub r15, 0x80",
+        // Reversed
+        "sub r8, 0x15; add r8, 0x15",
+        "sub r9, 0x25; add r9, 0x25",
+        "sub r10, 0x35; add r10, 0x35",
+        "sub r11, 0x45; add r11, 0x45",
 
-            // Reversed
-            "sub r8, 0x15; add r8, 0x15",
-            "sub r9, 0x25; add r9, 0x25",
-            "sub r10, 0x35; add r10, 0x35",
-            "sub r11, 0x45; add r11, 0x45",
+        // More complex math sequences
+        "add r8, 0x100; sub r8, 0x80; sub r8, 0x80",
+        "sub r9, 0x200; add r9, 0x100; add r9, 0x100",
+        "add r10, 0x50; add r10, 0x50; sub r10, 0xA0",
 
-            // More complex math sequences
-            "add r8, 0x100; sub r8, 0x80; sub r8, 0x80",
-            "sub r9, 0x200; add r9, 0x100; add r9, 0x100",
-            "add r10, 0x50; add r10, 0x50; sub r10, 0xA0",
+        // Simple XOR patterns
+        "xor r8, 0x1234; xor r8, 0x1234",
+        "xor r9, 0x5678; xor r9, 0x5678",
+        "xor r10, 0x9ABC; xor r10, 0x9ABC",
+        "xor r11, 0xDEF0; xor r11, 0xDEF0",
 
-            // Simple XOR patterns
-            "xor r8, 0x1234; xor r8, 0x1234",
-            "xor r9, 0x5678; xor r9, 0x5678",
-            "xor r10, 0x9ABC; xor r10, 0x9ABC",
-            "xor r11, 0xDEF0; xor r11, 0xDEF0",
+        // Bit rotation pairs (safe -- rotate is fully reversible)
+        "rol r8, 3; ror r8, 3",
+        "ror r9, 5; rol r9, 5",
+        "rol r10, 7; ror r10, 7",
+        "ror r11, 4; rol r11, 4",
 
-            // Bit rotation pairs (safe — rotate is fully reversible)
-            "rol r8, 3; ror r8, 3",
-            "ror r9, 5; rol r9, 5",
-            "rol r10, 7; ror r10, 7",
-            "ror r11, 4; rol r11, 4",
+        // Cross-register stack
+        "push r8; push r9; pop r9; pop r8",
 
-            // Cross-register stack
-            "push r8; push r9; pop r9; pop r8",
+        // Bitwise operations that don't change value
+        "or r8, 0",
+        "and r8, -1",
+        "or r9, 0",
+        "and r9, -1",
+        "or r10, 0",
+        "and r10, -1",
 
-            // Bitwise operations that don't change value
-            "or r8, 0",
-            "and r8, -1",
-            "or r9, 0",
-            "and r9, -1",
-            "or r10, 0",
-            "and r10, -1",
+        // rol/ror operations that don't change value
+        "rol r8, 1; ror r8, 1",
+        "rol r9, 2; ror r9, 2",
+        "ror r10, 3; rol r10, 3",
+        "ror r11, 4; rol r11, 4",
 
-            // rol/ror operations that don't change value
-            "rol r8, 1; ror r8, 1",
-            "rol r9, 2; ror r9, 2",
-            "ror r10, 3; rol r10, 3",
-            "ror r11, 4; rol r11, 4",
+        // INC/DEC pairs
+        "inc r8; dec r8",
+        "inc r9; dec r9",
+        "dec r10; inc r10",
+        "dec r11; inc r11",
 
-            // INC/DEC pairs
-            "inc r8; dec r8",
-            "inc r9; dec r9",
-            "dec r10; inc r10",
-            "dec r11; inc r11",
+        // Multiple operations that don't change value
+        "push r8; pop r8; push r9; pop r9",
+        "add r8, 1; add r8, 1; sub r8, 2",
+        "sub r9, 5; add r9, 3; add r9, 2",
+    };
 
-            // Multiple operations that don't change value
-            "push r8; pop r8; push r9; pop r9",
-            "add r8, 1; add r8, 1; sub r8, 2",
-            "sub r9, 5; add r9, 3; add r9, 2",
+    static const std::vector<std::string> junk_32bit = {
+        "mov eax, eax",
+        "mov ebx, ebx",
+        "mov ecx, ecx",
+        "mov edx, edx",
+        "mov esi, esi",
+        "mov edi, edi",
 
-        };
-    }
-    else {
-        junk_instructions = {
-            "mov eax, eax",
-            "mov ebx, ebx",
-            "mov ecx, ecx",
-            "mov edx, edx",
-            "mov esi, esi",
-            "mov edi, edi",
+        "add esi, 0x10; sub esi, 0x10",
+        "add edi, 0x20; sub edi, 0x20",
+        "sub esi, 0x15; add esi, 0x15",
+        "sub edi, 0x25; add edi, 0x25",
 
-            "add esi, 0x10; sub esi, 0x10",
-            "add edi, 0x20; sub edi, 0x20",
-            "sub esi, 0x15; add esi, 0x15",
-            "sub edi, 0x25; add edi, 0x25",
+        "xor esi, 0x1234; xor esi, 0x1234",
+        "xor edi, 0x5678; xor edi, 0x5678",
 
-            "xor esi, 0x1234; xor esi, 0x1234",
-            "xor edi, 0x5678; xor edi, 0x5678",
+        "push esi; pop esi",
+        "push edi; pop edi",
+        "push eax; push ebx; pop ebx; pop eax",
 
-            "push esi; pop esi",
-            "push edi; pop edi",
-            "push eax; push ebx; pop ebx; pop eax",
+        "test esi, esi",
+        "test edi, edi",
+        "cmp esi, esi",
+        "cmp edi, edi",
+        "lea esi, [esi]",
+        "lea edi, [edi]",
+        "inc esi; dec esi",
+        "inc edi; dec edi",
+        "rol esi, 1; ror esi, 1",
+        "rol edi, 2; ror edi, 2"
+    };
 
-            "test esi, esi",
-            "test edi, edi",
-            "cmp esi, esi",
-            "cmp edi, edi",
-            "lea esi, [esi]",
-            "lea edi, [edi]",
-            "inc esi; dec esi",
-            "inc edi; dec edi",
-            "rol esi, 1; ror esi, 1",
-            "rol edi, 2; ror edi, 2"
-        };
-    }
-
-    return junk_instructions[rand() % junk_instructions.size()];
+    const auto& pool = is_64_bit ? junk_64bit : junk_32bit;
+    return pool[rand() % pool.size()];
 }
 
 // Fill remaining memory space with NOPs (no-operation)
@@ -501,6 +498,65 @@ void TrampolineInjector::fill_remaining_space_with_nops(uint64_t address, size_t
             size -= 1;
         }
     }
+}
+
+// Patch a region with random junk instructions, returns bytes written
+size_t TrampolineInjector::patch_junk_region(ks_engine* ks, uint64_t start_address, size_t region_size, const LIEF::PE::Section& section) {
+    const size_t MAX_JUNK_ITERATIONS = 500;
+    uint64_t current_address = start_address;
+    size_t remaining = region_size;
+    size_t iteration_count = 0;
+
+    uint64_t section_start_va = image_base + section.virtual_address();
+    uint64_t section_end_va = section_start_va + section.virtual_size();
+
+    while (remaining > 0 && iteration_count < MAX_JUNK_ITERATIONS) {
+        iteration_count++;
+
+        std::string junk_asm = get_random_junk_instruction();
+        unsigned char* junk_encode = nullptr;
+        size_t junk_asm_size = 0;
+        size_t junk_count = 0;
+
+        if (ks_asm(ks, junk_asm.c_str(), current_address, &junk_encode, &junk_asm_size, &junk_count) == KS_ERR_OK && junk_count > 0) {
+            if (junk_asm_size <= remaining) {
+                // Check bounds before patching
+                uint64_t patch_end = current_address + junk_asm_size;
+
+                if (patch_end > section_end_va) {
+                    std::cerr << "Error: Junk patch would exceed section bounds. Stopping." << std::endl;
+                    ks_free(junk_encode);
+                    break;
+                }
+
+                std::vector<uint8_t> junk_bytes(junk_encode, junk_encode + junk_asm_size);
+                binary->patch_address(current_address, junk_bytes);
+
+                current_address += junk_asm_size;
+                remaining -= junk_asm_size;
+                ks_free(junk_encode);
+            }
+            else {
+                ks_free(junk_encode);
+                fill_remaining_space_with_nops(current_address, remaining);
+                current_address += remaining;
+                remaining = 0;
+            }
+        }
+        else {
+            fill_remaining_space_with_nops(current_address, remaining);
+            current_address += remaining;
+            remaining = 0;
+        }
+    }
+
+    if (iteration_count >= MAX_JUNK_ITERATIONS && remaining > 0) {
+        std::cerr << "Warning: Maximum junk iterations reached. Filling remaining space with NOPs." << std::endl;
+        fill_remaining_space_with_nops(current_address, remaining);
+        current_address += remaining;
+    }
+
+    return current_address - start_address;
 }
 
 // Create a JMP from original address to relocated code, insert junk to hide
@@ -622,65 +678,8 @@ bool TrampolineInjector::create_trampoline(uint64_t original_func_va, uint64_t n
 
         uint64_t current_address = original_func_va;
 
-        // Patch junk code before JMP instruction with iteration limit
-        size_t remaining_before = junk_before_size;
-        size_t junk_iteration_count = 0;
-        const size_t MAX_JUNK_ITERATIONS = 500; // Limit iterations to prevent infinite loops
-
-        /*std::cout << "Phase 1: Adding " << remaining_before << " bytes of junk before JMP..." << std::endl;*/
-
-        while (remaining_before > 0 && junk_iteration_count < MAX_JUNK_ITERATIONS) {
-            junk_iteration_count++;
-
-            std::string junk_asm = get_random_junk_instruction();
-            unsigned char* junk_encode = nullptr;
-            size_t junk_asm_size = 0;
-            size_t junk_count = 0;
-
-            if (ks_asm(ks, junk_asm.c_str(), current_address, &junk_encode, &junk_asm_size, &junk_count) == KS_ERR_OK && junk_count > 0) {
-                if (junk_asm_size <= remaining_before) {
-                    // CHECK BOUNDS BEFORE PATCHING
-                    uint64_t patch_end = current_address + junk_asm_size;
-                    uint64_t section_start_va = image_base + original_section->virtual_address();
-                    uint64_t section_end_va = section_start_va + original_section->virtual_size();
-
-                    if (patch_end > section_end_va) {
-                        std::cerr << "Error: Junk patch would exceed section bounds. Stopping." << std::endl;
-                        ks_free(junk_encode);
-                        break;
-                    }
-
-                    std::vector<uint8_t> junk_bytes(junk_encode, junk_encode + junk_asm_size);
-                    binary->patch_address(current_address, junk_bytes);
-
-                    /*std::cout << "  Added junk: " << junk_asm
-                        << " (" << junk_asm_size << " bytes) at VA 0x"
-                        << std::hex << current_address << std::dec << std::endl;*/
-
-                    current_address += junk_asm_size;
-                    remaining_before -= junk_asm_size;
-                    ks_free(junk_encode);
-                }
-                else {
-                    ks_free(junk_encode);
-                    fill_remaining_space_with_nops(current_address, remaining_before);
-                    current_address += remaining_before;
-                    remaining_before = 0;
-                }
-            }
-            else {
-                fill_remaining_space_with_nops(current_address, remaining_before);
-                current_address += remaining_before;
-                remaining_before = 0;
-            }
-        }
-
-        // Check if iteration limit is exceeded
-        if (junk_iteration_count >= MAX_JUNK_ITERATIONS) {
-            std::cerr << "Warning: Maximum junk iterations reached. Filling remaining space with NOPs." << std::endl;
-            fill_remaining_space_with_nops(current_address, remaining_before);
-            current_address += remaining_before;
-        }
+        // Patch junk code before JMP instruction
+        current_address += patch_junk_region(ks, current_address, junk_before_size, *original_section);
 
         // Patch JMP instruction at current address
         /*std::cout << "Phase 2: Patching JMP at VA 0x" << std::hex << current_address
@@ -700,64 +699,8 @@ bool TrampolineInjector::create_trampoline(uint64_t original_func_va, uint64_t n
         binary->patch_address(current_address, jmp_bytes);
         current_address += jmp_size;
 
-        // Patch junk code after JMP instruction with iteration limit
-        size_t remaining_after = junk_after_size;
-        junk_iteration_count = 0; // Reset counter
-
-        /*std::cout << "Phase 3: Adding " << remaining_after << " bytes of junk after JMP..." << std::endl;*/
-
-        // If no junk after JMP instruction, fill with NOPs
-        while (remaining_after > 0 && junk_iteration_count < MAX_JUNK_ITERATIONS) {
-            junk_iteration_count++;
-
-            std::string junk_asm = get_random_junk_instruction();
-            unsigned char* junk_encode = nullptr;
-            size_t junk_asm_size = 0;
-            size_t junk_count = 0;
-
-            if (ks_asm(ks, junk_asm.c_str(), current_address, &junk_encode, &junk_asm_size, &junk_count) == KS_ERR_OK && junk_count > 0) {
-                if (junk_asm_size <= remaining_after) {
-                    // CHECK BOUNDS BEFORE PATCHING
-                    uint64_t patch_end = current_address + junk_asm_size;
-                    uint64_t section_start_va = image_base + original_section->virtual_address();
-                    uint64_t section_end_va = section_start_va + original_section->virtual_size();
-
-                    if (patch_end > section_end_va) {
-                        std::cerr << "Error: Final junk patch would exceed section bounds. Stopping." << std::endl;
-                        ks_free(junk_encode);
-                        break;
-                    }
-
-                    std::vector<uint8_t> junk_bytes(junk_encode, junk_encode + junk_asm_size);
-                    binary->patch_address(current_address, junk_bytes);
-
-                    /*std::cout << "  Added junk: " << junk_asm
-                        << " (" << junk_asm_size << " bytes) at VA 0x"
-                        << std::hex << current_address << std::dec << std::endl;*/
-
-                    current_address += junk_asm_size;
-                    remaining_after -= junk_asm_size;
-                    ks_free(junk_encode);
-                }
-                else {
-                    ks_free(junk_encode);
-                    fill_remaining_space_with_nops(current_address, remaining_after);
-                    remaining_after = 0;
-                }
-            }
-            else {
-                fill_remaining_space_with_nops(current_address, remaining_after);
-                remaining_after = 0;
-            }
-        }
-
-        // Check if iteration limit is exceeded
-        if (junk_iteration_count >= MAX_JUNK_ITERATIONS) {
-            std::cerr << "Warning: Maximum final junk iterations reached. Filling remaining space with NOPs." << std::endl;
-            fill_remaining_space_with_nops(current_address, remaining_after);
-        }
-
-        /*std::cout << "Completed advanced trampoline with embedded JMP" << std::endl;*/
+        // Patch junk code after JMP instruction
+        patch_junk_region(ks, current_address, junk_after_size, *original_section);
         ks_close(ks);
         return true;
     }
