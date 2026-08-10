@@ -39,6 +39,12 @@ pe64::pe64(std::string binary_path) {
 	PIMAGE_NT_HEADERS nt =
 		reinterpret_cast<PIMAGE_NT_HEADERS>(temp_buffer.data() + dos->e_lfanew);
 
+	if (nt->Signature != IMAGE_NT_SIGNATURE)
+		throw std::runtime_error("input binary isn't a valid pe file (missing PE signature)!");
+
+	if (nt->OptionalHeader.Magic != IMAGE_NT_OPTIONAL_HDR64_MAGIC)
+		throw std::runtime_error("ObfuGuard requires a 64-bit PE optional header!");
+
 	if(nt->FileHeader.Machine != IMAGE_FILE_MACHINE_AMD64)
 		throw std::runtime_error("ObfuGuard doesn't support 32bit binaries!");
 
@@ -108,12 +114,33 @@ PIMAGE_SECTION_HEADER pe64::create_section(std::string name, uint32_t size, uint
 
 	if (name.length() > IMAGE_SIZEOF_SHORT_NAME)
 		throw std::runtime_error("section name can't be longer than 8 characters!");
-	PIMAGE_FILE_HEADER file_header = &this->get_nt()->FileHeader;
-	PIMAGE_OPTIONAL_HEADER optional_header = &this->get_nt()->OptionalHeader;
-	PIMAGE_SECTION_HEADER section_header = (PIMAGE_SECTION_HEADER)IMAGE_FIRST_SECTION(this->get_nt());
+
+	PIMAGE_NT_HEADERS nt = this->get_nt();
+	PIMAGE_FILE_HEADER file_header = &nt->FileHeader;
+	PIMAGE_OPTIONAL_HEADER optional_header = &nt->OptionalHeader;
+
+	if (file_header->NumberOfSections == 0)
+		throw std::runtime_error("PE has no sections; cannot append a new section!");
+
+	if (file_header->NumberOfSections >= ObfuGuard::PE_MAX_SECTIONS)
+		throw std::runtime_error("PE section count would exceed PE_MAX_SECTIONS limit!");
+
+	PIMAGE_SECTION_HEADER section_header = IMAGE_FIRST_SECTION(nt);
 	PIMAGE_SECTION_HEADER last_section = &section_header[file_header->NumberOfSections - 1];
-	PIMAGE_SECTION_HEADER new_section_header = nullptr;
-	new_section_header = (PIMAGE_SECTION_HEADER)((PUCHAR)(&last_section->Characteristics) + 4);
+	PIMAGE_SECTION_HEADER new_section_header =
+		reinterpret_cast<PIMAGE_SECTION_HEADER>(reinterpret_cast<PUCHAR>(&last_section->Characteristics) + 4);
+
+	// Ensure the new section header does not collide with the first section's raw data.
+	const uint32_t file_alignment = optional_header->FileAlignment
+		? optional_header->FileAlignment
+		: ObfuGuard::PE_FILE_ALIGNMENT;
+	const auto header_start = reinterpret_cast<uintptr_t>(this->buffer.data());
+	const auto new_header_end = reinterpret_cast<uintptr_t>(new_section_header) + sizeof(IMAGE_SECTION_HEADER);
+	const uint32_t needed_headers = this->align(
+		static_cast<uint32_t>(new_header_end - header_start), file_alignment);
+	if (section_header[0].PointerToRawData != 0 && needed_headers > section_header[0].PointerToRawData)
+		throw std::runtime_error("insufficient PE header space for a new section header!");
+
 	memset(new_section_header->Name, 0, IMAGE_SIZEOF_SHORT_NAME);
 	memcpy(new_section_header->Name, name.c_str(), name.length());
 	new_section_header->Misc.VirtualSize = align(size + sizeof(uint32_t) + 1, optional_header->SectionAlignment);
@@ -129,9 +156,14 @@ PIMAGE_SECTION_HEADER pe64::create_section(std::string name, uint32_t size, uint
 	file_header->NumberOfSections += 1;
 	uint32_t old_size = optional_header->SizeOfImage;
 	optional_header->SizeOfImage = align(optional_header->SizeOfImage + size + sizeof(uint32_t) + 1 + sizeof(IMAGE_SECTION_HEADER), optional_header->SectionAlignment);
-	optional_header->SizeOfHeaders = align(optional_header->SizeOfHeaders + sizeof(IMAGE_SECTION_HEADER), optional_header->FileAlignment);
+	// Grow headers only if the new section table entry needs more room
+	if (needed_headers > optional_header->SizeOfHeaders)
+		optional_header->SizeOfHeaders = needed_headers;
 
-	std::vector<uint8_t>new_buffer;
+	if (optional_header->SizeOfImage > ObfuGuard::MAX_PE_IMAGE_SIZE)
+		throw std::runtime_error("PE SizeOfImage would exceed maximum allowed size after adding section!");
+
+	std::vector<uint8_t> new_buffer;
 	new_buffer.resize(optional_header->SizeOfImage);
 	memset(new_buffer.data(), 0, optional_header->SizeOfImage);
 	memcpy(new_buffer.data(), this->buffer.data(), old_size);

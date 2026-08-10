@@ -8,10 +8,13 @@
 #include <sstream>
 #include <limits>
 #include <filesystem>
+#include <fstream>
+#include <mutex>
 
 namespace ObfuGuard {
 
-static const std::set<std::string> DANGEROUS_FUNCTION_NAMES = {
+// Built-in defaults used when no external blacklist file is available
+static const std::set<std::string> BUILTIN_DANGEROUS_FUNCTION_NAMES = {
     "mainCRTStartup","atexit",
     "__scrt_initialize_onexit_tables",
     "__scrt_dllmain_before_initialize",
@@ -32,7 +35,7 @@ static const std::set<std::string> DANGEROUS_FUNCTION_NAMES = {
     "clock", "ceil", "wcsnlen", "strpbrk", "GetLocaleNameFromLanguage", "strcspn", "memcmp", "qsort",
 };
 
-static const std::set<std::string> DANGEROUS_FUNCTION_NAMES_BIG_BINARY = {
+static const std::set<std::string> BUILTIN_DANGEROUS_FUNCTION_NAMES_BIG_BINARY = {
     "detect_pe_architecture", "main", "pe64::pe64", "pdbparser::pdbparser",
     "obfuscatecff::obfuscatecff", "obfuscatecff::run", "obfuscatecff::compile", "obfuscatecff::~obfuscatecff",
     "TrampolineInjector::TrampolineInjector", "TrampolineInjector::~TrampolineInjector",
@@ -57,6 +60,90 @@ static const std::vector<std::string> DANGEROUS_PREFIXES = {
     "??_",
 };
 
+// Runtime-loaded names (merged from file + defaults)
+static std::set<std::string> g_dangerous_names;
+static std::set<std::string> g_dangerous_names_big_binary;
+static std::once_flag g_blacklist_init_flag;
+static bool g_file_loaded = false;
+
+static void init_defaults() {
+    g_dangerous_names = BUILTIN_DANGEROUS_FUNCTION_NAMES;
+    g_dangerous_names_big_binary = BUILTIN_DANGEROUS_FUNCTION_NAMES_BIG_BINARY;
+}
+
+bool load_blacklist_file(const std::string& path) {
+    std::ifstream in(path);
+    if (!in.is_open()) {
+        return false;
+    }
+
+    // Ensure defaults exist before merging file entries
+    std::call_once(g_blacklist_init_flag, init_defaults);
+
+    std::string line;
+    size_t loaded = 0;
+    while (std::getline(in, line)) {
+        // Trim whitespace
+        auto start = line.find_first_not_of(" \t\r\n");
+        if (start == std::string::npos) continue;
+        auto end = line.find_last_not_of(" \t\r\n");
+        line = line.substr(start, end - start + 1);
+
+        if (line.empty() || line[0] == '#') continue;
+
+        // Optional section markers: [big] for large-binary-only names
+        if (line == "[big]" || line == "[big_binary]") {
+            // Subsequent names go to big-binary set until next section
+            // Simple mode: treat all non-section lines as standard blacklist;
+            // big-binary names can be prefixed with "big:"
+            continue;
+        }
+        if (line.rfind("big:", 0) == 0) {
+            g_dangerous_names_big_binary.insert(line.substr(4));
+            ++loaded;
+            continue;
+        }
+
+        g_dangerous_names.insert(line);
+        ++loaded;
+    }
+
+    if (loaded > 0) {
+        g_file_loaded = true;
+        std::cout << "Loaded " << loaded << " blacklist entries from: " << path << std::endl;
+    }
+    return loaded > 0 || in.eof();
+}
+
+void ensure_blacklist_loaded(const std::string& binary_path) {
+    std::call_once(g_blacklist_init_flag, init_defaults);
+
+    if (g_file_loaded) return;
+
+    // Candidate paths: CWD, next to target binary, and common relative locations
+    std::vector<std::filesystem::path> candidates = {
+        "blacklist_default.txt",
+        "ObfuGuard/blacklist_default.txt",
+        std::filesystem::path("..") / "ObfuGuard" / "blacklist_default.txt",
+    };
+
+    if (!binary_path.empty()) {
+        std::filesystem::path bp(binary_path);
+        candidates.push_back(bp.parent_path() / "blacklist_default.txt");
+        candidates.push_back(bp.parent_path() / "ObfuGuard" / "blacklist_default.txt");
+    }
+
+    for (const auto& cand : candidates) {
+        std::error_code ec;
+        if (std::filesystem::exists(cand, ec) && std::filesystem::is_regular_file(cand, ec)) {
+            if (load_blacklist_file(cand.string())) {
+                return;
+            }
+        }
+    }
+    // No file found: built-in defaults already initialized
+}
+
 static bool is_binary_large(const std::string& binary_path) {
     try {
         std::filesystem::path fp(binary_path);
@@ -68,9 +155,10 @@ static bool is_binary_large(const std::string& binary_path) {
 }
 
 bool is_function_blacklisted(const std::string& func_name) {
+    ensure_blacklist_loaded();
     if (func_name.find_first_of("`_") != std::string::npos) return true;
     if (func_name.rfind('_', 0) == 0) return true;
-    if (DANGEROUS_FUNCTION_NAMES.count(func_name)) return true;
+    if (g_dangerous_names.count(func_name)) return true;
     for (const auto& prefix : DANGEROUS_PREFIXES) {
         if (func_name.rfind(prefix, 0) == 0) return true;
     }
@@ -78,8 +166,9 @@ bool is_function_blacklisted(const std::string& func_name) {
 }
 
 bool is_function_blacklisted_by_binary_size(const std::string& func_name, const std::string& binary_path) {
+    ensure_blacklist_loaded(binary_path);
     if (is_function_blacklisted(func_name)) return true;
-    if (is_binary_large(binary_path) && DANGEROUS_FUNCTION_NAMES_BIG_BINARY.count(func_name) > 0) return true;
+    if (is_binary_large(binary_path) && g_dangerous_names_big_binary.count(func_name) > 0) return true;
     return false;
 }
 
@@ -88,6 +177,7 @@ std::vector<FunctionInfo> filter_functions(
     const std::string& binary_path,
     uint32_t min_size)
 {
+    ensure_blacklist_loaded(binary_path);
     std::vector<FunctionInfo> result;
     for (const auto& f : all_functions) {
         if (f.size < min_size) continue;

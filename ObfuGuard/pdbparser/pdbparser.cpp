@@ -1,4 +1,5 @@
 #include "pdbparser.h"
+#include "../constants.h"
 
 #include <Windows.h>
 #define _NO_CVCONST_H
@@ -33,7 +34,8 @@ pdbparser::pdbparser(pe64* pe_image) {
 
         auto file_size = static_cast<DWORD>(std::filesystem::file_size(resolved_pdb_path));
         this->module_base = reinterpret_cast<uint8_t*>(
-            SymLoadModuleEx(process_handle, nullptr, resolved_pdb_path.c_str(), nullptr, 0x10000000, file_size, nullptr, 0)
+            SymLoadModuleEx(process_handle, nullptr, resolved_pdb_path.c_str(), nullptr,
+                ObfuGuard::SYM_LOAD_BASE_ADDRESS, file_size, nullptr, 0)
             );
 
         if (!this->module_base) {
@@ -83,7 +85,8 @@ pdbparser::pdbparser(pe64* pe_image) {
 
         auto file_size = static_cast<DWORD>(std::filesystem::file_size(embedded_pdb));
         this->module_base = reinterpret_cast<uint8_t*>(
-            SymLoadModuleEx(process_handle, nullptr, embedded_pdb.c_str(), nullptr, 0x10000000, file_size, nullptr, 0)
+            SymLoadModuleEx(process_handle, nullptr, embedded_pdb.c_str(), nullptr,
+                ObfuGuard::SYM_LOAD_BASE_ADDRESS, file_size, nullptr, 0)
             );
 
         if (!this->module_base) {

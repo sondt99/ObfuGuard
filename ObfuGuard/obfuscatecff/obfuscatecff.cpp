@@ -6,6 +6,7 @@
 #include <climits>
 #include <unordered_set>
 #include <unordered_map>
+#include <random>
 
 #define REG_PAIR(zreg, areg) { ZYDIS_REGISTER_##zreg, asmjit::x86::areg }
 
@@ -109,10 +110,10 @@ int obfuscatecff::custom_main(int argc, char* argv[]) {
 	PIMAGE_SECTION_HEADER target_section = nullptr;
 	auto section_headers = IMAGE_FIRST_SECTION(nt_headers);
 
-	const char target_name[] = ".0Dev";
+	const char* target_name = ObfuGuard::CFF_DEV_SECTION_NAME;
 
 	for (int i = 0; i < nt_headers->FileHeader.NumberOfSections; ++i) {
-		if (strncmp(reinterpret_cast<char*>(section_headers[i].Name), target_name, sizeof(section_headers[i].Name)) == 0) {
+		if (strncmp(reinterpret_cast<char*>(section_headers[i].Name), target_name, 8) == 0) {
 			target_section = &section_headers[i];
 			break;
 		}
@@ -521,8 +522,11 @@ void obfuscatecff::compile(PIMAGE_SECTION_HEADER new_section) {
 
 			*reinterpret_cast<int32_t*>(&jmp_shell[1]) = static_cast<signed int>(dst - src - sizeof(jmp_shell));
 
-			for (int i = 0; i < func->size - 5; i++) {
-				*reinterpret_cast<uint8_t*>(reinterpret_cast<uint64_t>(base) + src + 5 + i) = rand() % 255 + 1;
+			static std::mt19937 pad_rng{ std::random_device{}() };
+			std::uniform_int_distribution<int> pad_dist(1, 255);
+			for (int i = 0; i < static_cast<int>(func->size) - 5; i++) {
+				*reinterpret_cast<uint8_t*>(reinterpret_cast<uint64_t>(base) + src + 5 + i) =
+					static_cast<uint8_t>(pad_dist(pad_rng));
 			}
 
 			memcpy(reinterpret_cast<void*>(base + src), jmp_shell, sizeof(jmp_shell));
@@ -536,7 +540,12 @@ void obfuscatecff::run(PIMAGE_SECTION_HEADER new_section, bool obfuscate_entry_p
 	if (!this->analyze_functions())
 		throw std::runtime_error("Error when analyzing function");
 
-	*reinterpret_cast<uint32_t*>(pe->get_buffer()->data() + new_section->VirtualAddress) = _rotl(pe->get_nt()->OptionalHeader.AddressOfEntryPoint, pe->get_nt()->FileHeader.TimeDateStamp) ^ pe->get_nt()->OptionalHeader.SizeOfStackCommit;
+	// Optionally encode original AddressOfEntryPoint into the new section for custom_main decoding
+	if (obfuscate_entry_point) {
+		*reinterpret_cast<uint32_t*>(pe->get_buffer()->data() + new_section->VirtualAddress) =
+			_rotl(pe->get_nt()->OptionalHeader.AddressOfEntryPoint, pe->get_nt()->FileHeader.TimeDateStamp)
+			^ pe->get_nt()->OptionalHeader.SizeOfStackCommit;
+	}
 
 	code.init(rt.environment());
 	code.attach(&this->assm);
@@ -675,7 +684,7 @@ void obfuscatecff::instruction_t::reload() { // reload instruction from raw_byte
 }
 
 void obfuscatecff::instruction_t::print() { // print information of the instruction
-	char buffer[256];
+	char buffer[ObfuGuard::INSTRUCTION_FORMAT_BUFFER_SIZE];
 	ZydisFormatterFormatInstruction(&formatter, &this->zyinstr.info, this->zyinstr.operands, this->zyinstr.info.operand_count,
 		buffer, sizeof(buffer), runtime_address, ZYAN_NULL);
 	puts(buffer);

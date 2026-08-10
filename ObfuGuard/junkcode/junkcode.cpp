@@ -16,7 +16,6 @@
 #include <capstone/capstone.h>
 #include <keystone/keystone.h>
 
-#include "../func2rva/func2rva.h"
 #include "../common/function_info.h"
 #include "../common/function_filter.h"
 
@@ -94,12 +93,14 @@ bool TrampolineInjector::check_section_limit_before_injection(uint32_t planned_i
     }
 }
 
-// Get original function code and relocate to new position
+// Get original function code and relocate to new position.
+// When known_function_size > 0 (from PDB), copy the full span instead of stopping at the first RET.
 bool TrampolineInjector::get_and_relocate_original_function_code(
     uint64_t original_func_va,
     uint64_t new_func_base_va,
     std::vector<uint8_t>& relocated_code_buffer,
-    size_t& determined_original_function_size)
+    size_t& determined_original_function_size,
+    size_t known_function_size)
 {
     relocated_code_buffer.clear();
     determined_original_function_size = 0;
@@ -167,15 +168,26 @@ bool TrampolineInjector::get_and_relocate_original_function_code(
     size_t count = 0;
     size_t current_copied_offset = 0;
     bool ret_found = false;
-    const size_t MAX_FUNC_SCAN_SIZE = 8192;
+    const bool use_pdb_size = known_function_size > 0;
     const uint8_t* code_ptr = function_raw_bytes_span.data();
     size_t code_available_size = function_raw_bytes_span.size();
 
+    // Prefer PDB size when available; always cap with MAX_FUNC_SCAN_SIZE for safety
+    size_t scan_limit = code_available_size;
+    if (use_pdb_size) {
+        scan_limit = (std::min)(scan_limit, known_function_size);
+    }
+    scan_limit = (std::min)(scan_limit, static_cast<size_t>(ObfuGuard::MAX_FUNC_SCAN_SIZE));
 
-    // Limit code scan size to prevent memory overflow
-    while (current_copied_offset < code_available_size && relocated_code_buffer.size() < MAX_FUNC_SCAN_SIZE) {
-        count = cs_disasm(cs_handle, code_ptr + current_copied_offset, code_available_size - current_copied_offset, original_func_va + current_copied_offset, 1, &insn);
+    // Disassemble within the scan limit (PDB size or first-RET fallback)
+    while (current_copied_offset < scan_limit && relocated_code_buffer.size() < ObfuGuard::MAX_FUNC_SCAN_SIZE) {
+        count = cs_disasm(cs_handle, code_ptr + current_copied_offset, scan_limit - current_copied_offset, original_func_va + current_copied_offset, 1, &insn);
         if (count > 0) {
+            // Do not start an instruction that would exceed the PDB-known span
+            if (use_pdb_size && current_copied_offset + insn[0].size > scan_limit) {
+                cs_free(insn, count);
+                break;
+            }
             std::vector<uint8_t> instr_bytes(insn[0].bytes, insn[0].bytes + insn[0].size);
 
             // Process CALL and JMP instructions
@@ -271,8 +283,11 @@ bool TrampolineInjector::get_and_relocate_original_function_code(
 
             if (insn[0].id == X86_INS_RET) {
                 ret_found = true;
-                cs_free(insn, count);
-                break;
+                // With PDB size, continue past early RETs so the full function body is relocated
+                if (!use_pdb_size) {
+                    cs_free(insn, count);
+                    break;
+                }
             }
 
             cs_free(insn, count); // Free memory of processed instruction
@@ -292,13 +307,12 @@ bool TrampolineInjector::get_and_relocate_original_function_code(
         return false;
     }
 
-    // Print relocated code for debugging
-    if (!ret_found) {
+    // Only append a synthetic RET when size was unknown and no RET was found
+    if (!use_pdb_size && !ret_found) {
         std::cout << "Warning: No RET instruction found within scan limit. Appending RET (0xC3)." << std::endl;
         relocated_code_buffer.push_back(0xC3);
     }
 
-    // Print relocated code
     determined_original_function_size = current_copied_offset;
     return true;
 }
@@ -495,7 +509,6 @@ void TrampolineInjector::fill_remaining_space_with_nops(uint64_t address, size_t
 
 // Patch a region with random junk instructions, returns bytes written
 size_t TrampolineInjector::patch_junk_region(ks_engine* ks, uint64_t start_address, size_t region_size, const LIEF::PE::Section& section) {
-    const size_t MAX_JUNK_ITERATIONS = 500;
     uint64_t current_address = start_address;
     size_t remaining = region_size;
     size_t iteration_count = 0;
@@ -503,7 +516,7 @@ size_t TrampolineInjector::patch_junk_region(ks_engine* ks, uint64_t start_addre
     uint64_t section_start_va = image_base + section.virtual_address();
     uint64_t section_end_va = section_start_va + section.virtual_size();
 
-    while (remaining > 0 && iteration_count < MAX_JUNK_ITERATIONS) {
+    while (remaining > 0 && iteration_count < ObfuGuard::MAX_JUNK_ITERATIONS) {
         iteration_count++;
 
         std::string junk_asm = get_random_junk_instruction();
@@ -543,7 +556,7 @@ size_t TrampolineInjector::patch_junk_region(ks_engine* ks, uint64_t start_addre
         }
     }
 
-    if (iteration_count >= MAX_JUNK_ITERATIONS && remaining > 0) {
+    if (iteration_count >= ObfuGuard::MAX_JUNK_ITERATIONS && remaining > 0) {
         std::cerr << "Warning: Maximum junk iterations reached. Filling remaining space with NOPs." << std::endl;
         fill_remaining_space_with_nops(current_address, remaining);
         current_address += remaining;
@@ -596,21 +609,19 @@ bool TrampolineInjector::create_trampoline(uint64_t original_func_va, uint64_t n
         }
 
         // 3. Check minimum required size
-        const size_t MIN_PATCH_SIZE = 5; // Ensure minimum 5 bytes processing
-        if (original_size < MIN_PATCH_SIZE) {
+        if (original_size < ObfuGuard::MIN_TRAMPOLINE_PATCH_SIZE) {
             std::cerr << "Error: Original function size (" << original_size
                 << " bytes) is too small for trampoline injection (minimum: "
-                << MIN_PATCH_SIZE << " bytes)" << std::endl;
+                << ObfuGuard::MIN_TRAMPOLINE_PATCH_SIZE << " bytes)" << std::endl;
             ks_close(ks);
             return false;
         }
 
         // 4. Check reasonable size (avoid overly large patches)
-        const size_t MAX_PATCH_SIZE = 0x1000; // 4KB max
-        if (original_size > MAX_PATCH_SIZE) {
+        if (original_size > ObfuGuard::MAX_TRAMPOLINE_PATCH_SIZE) {
             std::cerr << "Warning: Original function size (" << original_size
-                << " bytes) is very large. Limiting to " << MAX_PATCH_SIZE << " bytes." << std::endl;
-            original_size = MAX_PATCH_SIZE;
+                << " bytes) is very large. Limiting to " << ObfuGuard::MAX_TRAMPOLINE_PATCH_SIZE << " bytes." << std::endl;
+            original_size = ObfuGuard::MAX_TRAMPOLINE_PATCH_SIZE;
         }
 
     }
@@ -705,11 +716,11 @@ bool TrampolineInjector::create_trampoline(uint64_t original_func_va, uint64_t n
 }
 
 // Inject a function: relocate original code, create new section, insert trampoline
-bool TrampolineInjector::inject_function_trampoline(uint32_t function_rva) {
+bool TrampolineInjector::inject_function_trampoline(uint32_t function_rva, uint32_t function_size) {
     uint64_t original_function_va = image_base + function_rva;
 
     /*std::cout << "Step 1: Creating new section '.injcod'..." << std::endl;*/
-    if (!create_new_section(".injcod", 0x1000)) {
+    if (!create_new_section(".injcod", ObfuGuard::DEFAULT_SECTION_SIZE)) {
         std::cerr << "Error: Could not create new section." << std::endl;
         return false;
     }
@@ -718,8 +729,8 @@ bool TrampolineInjector::inject_function_trampoline(uint32_t function_rva) {
     std::vector<uint8_t> relocated_code_bytes;
     size_t original_function_processed_size = 0;
 
-    // First get relocated code before building
-    if (!get_and_relocate_original_function_code(original_function_va, 0, relocated_code_bytes, original_function_processed_size)) {
+    // First get relocated code before building (use PDB size when available)
+    if (!get_and_relocate_original_function_code(original_function_va, 0, relocated_code_bytes, original_function_processed_size, function_size)) {
         std::cerr << "Error processing original function code." << std::endl;
         return false;
     }
@@ -745,14 +756,14 @@ bool TrampolineInjector::inject_function_trampoline(uint32_t function_rva) {
 
     // Update new section content first
     uint32_t file_alignment = binary_ptr->optional_header().file_alignment();
-    if (file_alignment == 0) file_alignment = 0x200;
+    if (file_alignment == 0) file_alignment = ObfuGuard::PE_FILE_ALIGNMENT;
 
     uint32_t section_alignment = binary_ptr->optional_header().section_alignment();
-    if (section_alignment == 0) section_alignment = 0x1000;
+    if (section_alignment == 0) section_alignment = ObfuGuard::PE_SECTION_ALIGNMENT;
 
     size_t final_raw_size = ((relocated_code_bytes.size() + file_alignment - 1) / file_alignment) * file_alignment;
     size_t final_virtual_size = ((relocated_code_bytes.size() + section_alignment - 1) / section_alignment) * section_alignment;
-    final_virtual_size = std::max(final_virtual_size, static_cast<size_t>(0x1000));
+    final_virtual_size = std::max(final_virtual_size, static_cast<size_t>(ObfuGuard::DEFAULT_SECTION_SIZE));
     final_virtual_size = std::max(final_virtual_size, final_raw_size);
 
     new_section_ptr->size(static_cast<uint32_t>(final_raw_size));
@@ -777,7 +788,7 @@ bool TrampolineInjector::inject_function_trampoline(uint32_t function_rva) {
 
     // Relocate original code to new address correctly
     relocated_code_bytes.clear();
-    if (!get_and_relocate_original_function_code(original_function_va, new_function_base_va, relocated_code_bytes, original_function_processed_size)) {
+    if (!get_and_relocate_original_function_code(original_function_va, new_function_base_va, relocated_code_bytes, original_function_processed_size, function_size)) {
         std::cerr << "Error processing original function code with correct VA." << std::endl;
         return false;
     }
@@ -811,7 +822,7 @@ std::string TrampolineInjector::generate_unique_section_name(const std::string& 
     // Create section name with index
     std::string section_name = "." + clean_name + std::to_string(index);
 
-    // Ensure不超过8 characters (not exceeding 8 characters)
+    // Ensure section name does not exceed 8 characters (PE limit)
     if (section_name.length() > 8) {
         section_name = ".jk" + std::to_string(index);
     }
@@ -821,7 +832,8 @@ std::string TrampolineInjector::generate_unique_section_name(const std::string& 
 
 // Function to handle multiple functions at once
 bool TrampolineInjector::inject_multiple_function_trampolines(const std::vector<uint32_t>& function_rvas,
-    const std::vector<std::string>& function_names) {
+    const std::vector<std::string>& function_names,
+    const std::vector<uint32_t>& function_sizes) {
     if (function_rvas.empty()) {
         std::cerr << "Error: No functions provided for injection." << std::endl;
         return false;
@@ -832,11 +844,17 @@ bool TrampolineInjector::inject_multiple_function_trampolines(const std::vector<
         return false;
     }
 
+    if (!function_sizes.empty() && function_sizes.size() != function_rvas.size()) {
+        std::cerr << "Error: Mismatch between function RVAs and sizes count." << std::endl;
+        return false;
+    }
+
     /*std::cout << "Processing " << function_rvas.size() << " function(s) for trampoline injection..." << std::endl;*/
 
     for (size_t i = 0; i < function_rvas.size(); ++i) {
         uint32_t function_rva = function_rvas[i];
         const std::string& function_name = function_names[i];
+        const size_t known_size = function_sizes.empty() ? 0 : function_sizes[i];
 
         /*std::cout << "\n--- Processing function " << (i + 1) << "/" << function_rvas.size()
             << ": " << function_name << " (RVA: 0x" << std::hex << function_rva << std::dec << ") ---" << std::endl;*/
@@ -848,7 +866,7 @@ bool TrampolineInjector::inject_multiple_function_trampolines(const std::vector<
         /*std::cout << "Creating section: " << section_name << std::endl;*/
 
         // Create new section for this function
-        if (!create_new_section(section_name, 0x1000)) {
+        if (!create_new_section(section_name, ObfuGuard::DEFAULT_SECTION_SIZE)) {
             std::cerr << "Error: Could not create section " << section_name << " for function " << function_name << std::endl;
             return false;
         }
@@ -857,8 +875,8 @@ bool TrampolineInjector::inject_multiple_function_trampolines(const std::vector<
         std::vector<uint8_t> relocated_code_bytes;
         size_t original_function_processed_size = 0;
 
-        // Get relocated code before building
-        if (!get_and_relocate_original_function_code(original_function_va, 0, relocated_code_bytes, original_function_processed_size)) {
+        // Get relocated code before building (prefer PDB size)
+        if (!get_and_relocate_original_function_code(original_function_va, 0, relocated_code_bytes, original_function_processed_size, known_size)) {
             std::cerr << "Error processing original function code for " << function_name << std::endl;
             return false;
         }
@@ -884,14 +902,14 @@ bool TrampolineInjector::inject_multiple_function_trampolines(const std::vector<
 
         // Update section content
         uint32_t file_alignment = binary_ptr->optional_header().file_alignment();
-        if (file_alignment == 0) file_alignment = 0x200;
+        if (file_alignment == 0) file_alignment = ObfuGuard::PE_FILE_ALIGNMENT;
 
         uint32_t section_alignment = binary_ptr->optional_header().section_alignment();
-        if (section_alignment == 0) section_alignment = 0x1000;
+        if (section_alignment == 0) section_alignment = ObfuGuard::PE_SECTION_ALIGNMENT;
 
         size_t final_raw_size = ((relocated_code_bytes.size() + file_alignment - 1) / file_alignment) * file_alignment;
         size_t final_virtual_size = ((relocated_code_bytes.size() + section_alignment - 1) / section_alignment) * section_alignment;
-        final_virtual_size = std::max(final_virtual_size, static_cast<size_t>(0x1000));
+        final_virtual_size = std::max(final_virtual_size, static_cast<size_t>(ObfuGuard::DEFAULT_SECTION_SIZE));
         final_virtual_size = std::max(final_virtual_size, final_raw_size);
 
         new_section_ptr->size(static_cast<uint32_t>(final_raw_size));
@@ -916,7 +934,7 @@ bool TrampolineInjector::inject_multiple_function_trampolines(const std::vector<
 
         // Relocate code again with correct VA address
         relocated_code_bytes.clear();
-        if (!get_and_relocate_original_function_code(original_function_va, new_function_base_va, relocated_code_bytes, original_function_processed_size)) {
+        if (!get_and_relocate_original_function_code(original_function_va, new_function_base_va, relocated_code_bytes, original_function_processed_size, known_size)) {
             std::cerr << "Error processing original function code with correct VA for " << function_name << std::endl;
             return false;
         }
@@ -942,7 +960,8 @@ bool TrampolineInjector::inject_multiple_function_trampolines(const std::vector<
 bool TrampolineInjector::inject_multiple_function_trampolines_with_limit(
     const std::vector<uint32_t>& function_rvas,
     const std::vector<std::string>& function_names,
-    uint32_t& actual_injected_count)
+    uint32_t& actual_injected_count,
+    const std::vector<uint32_t>& function_sizes)
 {
     actual_injected_count = 0;
 
@@ -953,6 +972,11 @@ bool TrampolineInjector::inject_multiple_function_trampolines_with_limit(
 
     if (function_rvas.size() != function_names.size()) {
         std::cerr << "Error: Mismatch between function RVAs and names count." << std::endl;
+        return false;
+    }
+
+    if (!function_sizes.empty() && function_sizes.size() != function_rvas.size()) {
+        std::cerr << "Error: Mismatch between function RVAs and sizes count." << std::endl;
         return false;
     }
 
@@ -977,9 +1001,13 @@ bool TrampolineInjector::inject_multiple_function_trampolines_with_limit(
         // Create limited vector
     std::vector<uint32_t> limited_rvas(function_rvas.begin(), function_rvas.begin() + functions_to_inject);
     std::vector<std::string> limited_names(function_names.begin(), function_names.begin() + functions_to_inject);
+    std::vector<uint32_t> limited_sizes;
+    if (!function_sizes.empty()) {
+        limited_sizes.assign(function_sizes.begin(), function_sizes.begin() + functions_to_inject);
+    }
 
     // Perform injection of qualified functions
-    bool result = inject_multiple_function_trampolines(limited_rvas, limited_names);
+    bool result = inject_multiple_function_trampolines(limited_rvas, limited_names, limited_sizes);
 
     if (result) {
         actual_injected_count = functions_to_inject;
@@ -993,7 +1021,8 @@ bool TrampolineInjector::inject_trampoline_to_multiple_functions(
     const std::string& input_pe_path,
     const std::string& output_pe_path,
     const std::vector<uint32_t>& function_rvas,
-    const std::vector<std::string>& function_names)
+    const std::vector<std::string>& function_names,
+    const std::vector<uint32_t>& function_sizes)
 {
     TrampolineInjector injector;
 
@@ -1001,7 +1030,7 @@ bool TrampolineInjector::inject_trampoline_to_multiple_functions(
         return false;
     }
 
-    if (!injector.inject_multiple_function_trampolines(function_rvas, function_names)) {
+    if (!injector.inject_multiple_function_trampolines(function_rvas, function_names, function_sizes)) {
         return false;
     }
 
@@ -1009,325 +1038,7 @@ bool TrampolineInjector::inject_trampoline_to_multiple_functions(
 }
 
 // ============ IMPLEMENTATION OF JunkCodeManager ============
-const uint32_t JunkCodeManager::LARGE_BINARY_SIZE_THRESHOLD = 350 * 1024;
-
-// Dangerous functions and dangerous prefixes
-const std::set<std::string> JunkCodeManager::DANGEROUS_FUNCTION_NAMES = {
-    "mainCRTStartup","atexit",
-    "__scrt_initialize_onexit_tables",
-    "__scrt_dllmain_before_initialize",
-    "_initterm",
-    "_initterm_e",
-    "__C_specific_handler",
-    "_chkstk",
-    "__security_check_cookie",
-    "__GSHandlerCheck",
-    "__isa_available_init",
-    "pre_c_initialization","DebuggerRuntime",
-    "pre_cpp_initialization","operator new","operator delete","failwithmessage",
-    "exit", "fget", "fwrite", "memcpy", "memmove", "memset", "malloc", "free",
-    "fread", "fclose", "fopen", "fprintf", "printf", "sprintf", "snprintf",
-    "strcpy", "strncpy", "strcat", "strncat", "strlen", "strcmp", "strncmp",
-    "fgetc", "fgets", "fputc", "fputs", "vfprintf", "vprintf", "vsprintf", "fgetpos", "fsetpos", "fegetenv",
-    "srand", "rand", "time", "localtime", "gmtime", "asctime", "ctime",
-    "clock", "ceil", "wcsnlen", "strpbrk", "GetLocaleNameFromLanguage", "strcspn", "memcmp", "qsort",
-};
-
-const std::set<std::string> JunkCodeManager::DANGEROUS_FUNCTION_NAMES_BIG_BINARY = {
-    "detect_pe_architecture", "main", "pe64::pe64", "pdbparser::pdbparser", "obfuscatecff::obfuscatecff", "obfuscatecff::run", "obfuscatecff::compile", "obfuscatecff::~obfuscatecff", "TrampolineInjector::TrampolineInjector", "TrampolineInjector::~TrampolineInjector", "FuncToRVA::RVAResolver::initialize", "FuncToRVA::RVAResolver::RVAResolver", "FuncToRVA::RVAResolver::~RVAResolver",
-    "terminate", "raise", "raise$fin$0", "std::setw", "ceilf", "InternalCompareStringA", "InternalGetLocaleInfoA",
-    "std::filesystem::exists", "std::filesystem::path::path", "std::filesystem::path::operator/=", "std::filesystem::path::string", "std::filesystem::operator/", "std::vector<unsigned char,std::allocator<unsigned char> >::vector<unsigned char,std::allocator<unsigned char> >", "std::vector<unsigned char,std::allocator<unsigned char> >::resize", "std::vector<unsigned int,std::allocator<unsigned int> >::operator=", "std::exception::exception", "std::exception::what",
-    "strrchr", "srand", "CountryEnumProc","LangCountryEnumProc", "LangCountryEnumProcEx","strnlen", "strtol","strtoul","wcschr","wcscmp","wcsncmp","wcspbrk","isdigit","islower","isupper",
-    "GetLcidFromLanguage","GetLcidFromLangCountry","TranslateName","TestDefaultLanguage","setSBCS",
-    "setSBUpLow","setvbuf","getSystemCP","ExFilterRethrow","ExFilterRethrowFH4","fallbackMethod","FH4::HandlerMap4::HandlerMap4","FH4::HandlerMap4::DecompHandler",
-    "FH4::TryBlockMap4::TryBlockMap4","FH4::TryBlockMap4::setBuffer","FH4::UWMap4::ReadEntry","FH4::UWMap4::getStateFromIterators","FH4::UWMap4::getStartStop","IsInExceptionSpec",
-};
-
-
-
-bool JunkCodeManager::is_large_binary_function_dangerous(const std::string& func_name, const std::string& binary_path) {
-    // Only check when binary is larger than threshold
-    if (!is_binary_large(binary_path)) {
-        return false;
-    }
-
-    // Check if function name is in the list of dangerous functions for large binary
-    return DANGEROUS_FUNCTION_NAMES_BIG_BINARY.count(func_name) > 0;
-}
-
-const std::vector<std::string> JunkCodeManager::DANGEROUS_PREFIXES = {
-    "??_",
-};
-
-// Check binary size and return true if binary is larger than threshold
-bool JunkCodeManager::is_binary_large(const std::string& binary_path) {
-    try {
-        std::filesystem::path file_path(binary_path);
-        if (!std::filesystem::exists(file_path)) {
-            std::cerr << "Error: Binary file does not exist: " << binary_path << std::endl;
-            return false;
-        }
-
-        std::uintmax_t file_size = std::filesystem::file_size(file_path);
-
-        /*std::cout << "Binary size: " << (file_size / 1024) << " KB (Threshold: "
-            << (LARGE_BINARY_SIZE_THRESHOLD / 1024) << " KB)" << std::endl;*/
-
-        return file_size > LARGE_BINARY_SIZE_THRESHOLD;
-    }
-    catch (const std::filesystem::filesystem_error& e) {
-        std::cerr << "Error checking binary size: " << e.what() << std::endl;
-        return false;
-    }
-
-
-}
-// Check if function name is blacklisted
-bool JunkCodeManager::is_function_blacklisted(const std::string& func_name) {
-    // Functions with special characters like "_" or "`" are usually internal or unwanted functions
-    if (func_name.find_first_of("`_") != std::string::npos) {
-        return true;
-    }
-    // Start with underscore
-    if (func_name.rfind('_', 0) == 0) {
-        return true;
-    }
-
-    // Check if function name is in the list of dangerous functions
-    if (DANGEROUS_FUNCTION_NAMES.count(func_name)) {
-        return true;
-    }
-
-    // Check if function name starts with dangerous prefixes
-    for (const auto& prefix : DANGEROUS_PREFIXES) {
-        if (func_name.rfind(prefix, 0) == 0) {
-            return true;
-        }
-    }
-
-    return false;
-}
-
-bool JunkCodeManager::is_function_blacklisted_by_binary_size(const std::string& func_name, const std::string& binary_path) {
-    // Check normal blacklist first
-    if (is_function_blacklisted(func_name)) {
-        return true;
-    }
-
-    // Check blacklist based on binary size
-    if (is_large_binary_function_dangerous(func_name, binary_path)) {
-        return true;
-    }
-
-    return false;
-}
-
-// Sort functions by size in descending order
-void JunkCodeManager::sort_functions_by_size_desc(std::vector<uint32_t>& function_rvas,
-    std::vector<std::string>& function_names,
-    const std::vector<FuncToRVA::FunctionInfo>& all_functions) {
-
-    // Create a vector to store index and size pairs
-    std::vector<std::pair<size_t, uint32_t>> index_size_pairs;
-
-    for (size_t i = 0; i < function_rvas.size(); ++i) {
-        uint32_t rva = function_rvas[i];
-
-        // Find function size based on RVA
-        auto it = std::find_if(all_functions.begin(), all_functions.end(),
-            [rva](const FuncToRVA::FunctionInfo& func) { return func.rva == rva; });
-
-        if (it != all_functions.end()) {
-            index_size_pairs.push_back({ i, it->size });
-        }
-        else {
-            index_size_pairs.push_back({ i, 0 }); // If not found, set size to 0
-        }
-    }
-
-    // Sort index and size pairs by size in descending order
-    std::sort(index_size_pairs.begin(), index_size_pairs.end(),
-        [](const std::pair<size_t, uint32_t>& a, const std::pair<size_t, uint32_t>& b) {
-            return a.second > b.second; // Descending by size
-        });
-
-    // Reorder arrays based on sorted indices
-    std::vector<uint32_t> sorted_rvas;
-    std::vector<std::string> sorted_names;
-
-    for (const auto& pair : index_size_pairs) {
-        sorted_rvas.push_back(function_rvas[pair.first]);
-        sorted_names.push_back(function_names[pair.first]);
-    }
-
-    function_rvas = std::move(sorted_rvas);
-    function_names = std::move(sorted_names);
-}
-
-// Get multiple RVAs interactively from user
-bool JunkCodeManager::get_multiple_rvas_interactive(const std::string& input_pe_path,
-    std::vector<uint32_t>& rvas_out,
-    std::vector<std::string>& names_out) {
-
-    std::cout << "Attempting to select multiple function RVAs from: " << input_pe_path << std::endl;
-    if (FuncToRVA::get_multiple_rvas_by_interactive_selection(input_pe_path, rvas_out, names_out)) {
-        std::cout << "Selected " << rvas_out.size() << " function(s):" << std::endl;
-        for (size_t i = 0; i < rvas_out.size(); ++i) {
-            std::cout << "  " << (i + 1) << ". " << names_out[i]
-                << " (RVA: 0x" << std::hex << rvas_out[i] << std::dec << ")" << std::endl;
-        }
-        return true;
-    }
-    else {
-        std::cout << "Please enter RVAs manually or ensure a valid PDB is accessible.\n" << std::endl;
-
-        // Manual input for multiple RVAs
-        std::string input_str;
-        std::cout << "Type RVAs of functions (comma-separated, e.g., 1A2B0,1C3D0): ";
-        std::getline(std::cin, input_str);
-
-        if (input_str.empty()) {
-            std::cerr << "Error: No RVAs provided." << std::endl;
-            return false;
-        }
-
-        // Get corresponding RVAs
-        std::stringstream ss(input_str);
-        std::string token;
-        rvas_out.clear();
-        names_out.clear();
-
-        while (std::getline(ss, token, ',')) {
-            // Trim whitespace
-            token.erase(0, token.find_first_not_of(" \t"));
-            token.erase(token.find_last_not_of(" \t") + 1);
-
-            try {
-                std::string temp_token = token;
-
-                if (temp_token.rfind("0x", 0) == 0 || temp_token.rfind("0X", 0) == 0) {
-                    temp_token = temp_token.substr(2);
-                }
-
-                if (temp_token.empty()) {
-                    std::cerr << "Error: Invalid RVA format '" << token << "'." << std::endl;
-                    continue;
-                }
-
-                uint32_t rva = static_cast<uint32_t>(std::stoul(temp_token, nullptr, 16));
-                rvas_out.push_back(rva);
-                names_out.push_back("Manual_RVA_0x" + temp_token);
-
-                std::cout << "Added RVA: 0x" << std::hex << rva << std::dec << std::endl;
-            }
-            catch (const std::exception& e) {
-                std::cerr << "Error parsing RVA '" << token << "': " << e.what() << std::endl;
-            }
-        }
-
-        if (rvas_out.empty()) {
-            std::cerr << "Error: No valid RVAs were parsed." << std::endl;
-            return false;
-        }
-
-        std::cout << "Using " << rvas_out.size() << " manually provided RVA(s)." << std::endl;
-        return true;
-    }
-}
-
-// Filter functions by minimum size
-bool JunkCodeManager::filter_functions_by_size(const std::string& input_pe_path,
-    const std::vector<uint32_t>& input_rvas,
-    const std::vector<std::string>& input_names,
-    std::vector<uint32_t>& filtered_rvas,
-    std::vector<std::string>& filtered_names,
-    uint32_t min_size) {
-
-    filtered_rvas.clear();
-    filtered_names.clear();
-
-    try {
-        // Initialize RVAResolver to get size information
-        FuncToRVA::RVAResolver resolver(input_pe_path);
-        if (!resolver.initialize()) {
-            std::cerr << "Error: Could not initialize PDB resolver for size filtering.\n";
-            return false;
-        }
-
-        const auto& all_functions = resolver.get_functions_info();
-        std::vector<std::string> excluded_functions;
-        std::vector<uint32_t> excluded_sizes;
-        std::vector<std::string> excluded_by_binary_size_blacklist;
-
-        for (size_t i = 0; i < input_rvas.size(); ++i) {
-            uint32_t rva = input_rvas[i];
-            const std::string& name = input_names[i];
-
-            // Find size information from all_functions
-            auto it = std::find_if(all_functions.begin(), all_functions.end(),
-                [rva](const FuncToRVA::FunctionInfo& func) { return func.rva == rva; });
-
-            if (it != all_functions.end()) {
-                if (is_function_blacklisted_by_binary_size(it->name, input_pe_path)) {
-                    excluded_functions.push_back(name);
-                    excluded_sizes.push_back(it->size);
-
-                    if (is_large_binary_function_dangerous(it->name, input_pe_path)) {
-                        excluded_by_binary_size_blacklist.push_back(name);
-                    }
-                    continue;
-                }
-
-                if (it->size >= min_size) {
-                    filtered_rvas.push_back(rva);
-                    filtered_names.push_back(name);
-                }
-                else {
-                    excluded_functions.push_back(name);
-                    excluded_sizes.push_back(it->size);
-                }
-            }
-            else {
-                // Not found in PDB, could be manual RVA
-                std::cout << "Warning: Could not find size info for " << name << " (RVA: 0x"
-                    << std::hex << rva << std::dec << "). Adding to filtered list." << std::endl;
-                filtered_rvas.push_back(rva);
-                filtered_names.push_back(name);
-            }
-        }
-
-        // Display filtering results
-        if (!excluded_functions.empty()) {
-            std::cout << "\n=== Size Filtering Results ===" << std::endl;
-            std::cout << "Excluded " << excluded_functions.size() << " function(s):" << std::endl;
-            for (size_t i = 0; i < excluded_functions.size(); ++i) {
-                std::string reason = "size < " + std::to_string(min_size) + " bytes";
-
-                // ========== CHANGE: Display exclusion reason based on binary size ==========
-                if (std::find(excluded_by_binary_size_blacklist.begin(), excluded_by_binary_size_blacklist.end(),
-                    excluded_functions[i]) != excluded_by_binary_size_blacklist.end()) {
-                    reason = "large binary blacklist (binary > " + std::to_string(LARGE_BINARY_SIZE_THRESHOLD / 1024) + "KB)";
-                }
-
-                std::cout << "  - " << excluded_functions[i] << " (" << reason << ")" << std::endl;
-            }
-            std::cout << std::endl;
-        }
-
-        if (filtered_rvas.empty()) {
-            std::cout << "Warning: No functions remain after size filtering (min size: " << min_size << " bytes)." << std::endl;
-            return false;
-        }
-
-        std::cout << "After filtering: " << filtered_rvas.size() << " function(s) with size >= " << min_size << " bytes" << std::endl;
-        return true;
-
-    }
-    catch (const std::exception& e) {
-        std::cerr << "Error during size filtering: " << e.what() << std::endl;
-        return false;
-    }
-}
+// Filtering/blacklist logic lives in ObfuGuard::function_filter (single source of truth).
 
 // Implement automatic code injection mode
 int JunkCodeManager::run_auto_injection_mode(const std::string& input_pe_path,
@@ -1343,15 +1054,18 @@ int JunkCodeManager::run_auto_injection_mode(const std::string& input_pe_path,
         // Sort by size descending
         ObfuGuard::sort_functions_by_size_desc(filtered);
 
-        // Extract RVAs and names into parallel vectors
+        // Extract RVAs, names, and PDB sizes into parallel vectors
         std::vector<uint32_t> function_rvas;
         std::vector<std::string> function_names;
+        std::vector<uint32_t> function_sizes;
         function_rvas.reserve(filtered.size());
         function_names.reserve(filtered.size());
+        function_sizes.reserve(filtered.size());
 
         for (const auto& func : filtered) {
             function_rvas.push_back(func.rva);
             function_names.push_back(func.name);
+            function_sizes.push_back(func.size);
         }
 
         if (function_rvas.empty()) {
@@ -1365,7 +1079,7 @@ int JunkCodeManager::run_auto_injection_mode(const std::string& input_pe_path,
         uint32_t actual_injected_count = 0;
         bool result = TrampolineInjector::inject_trampoline_to_multiple_functions_smart(
             input_pe_path, output_pe_path, function_rvas, function_names,
-            actual_injected_count);
+            actual_injected_count, function_sizes);
 
         if (!result) {
             std::cerr << "Smart Auto-injection failed!\n";
@@ -1420,12 +1134,14 @@ int JunkCodeManager::run_manual_injection_mode(const std::string& input_pe_path,
 
         std::vector<ObfuGuard::FunctionInfo> filtered = ObfuGuard::filter_functions(selected_functions, input_pe_path, 5);
 
-        // Extract RVAs and names from filtered list
+        // Extract RVAs, names, and PDB sizes from filtered list
         function_rvas.clear();
         function_names.clear();
+        std::vector<uint32_t> function_sizes;
         for (const auto& func : filtered) {
             function_rvas.push_back(func.rva);
             function_names.push_back(func.name);
+            function_sizes.push_back(func.size);
         }
 
         if (function_rvas.empty()) {
@@ -1439,7 +1155,7 @@ int JunkCodeManager::run_manual_injection_mode(const std::string& input_pe_path,
         uint32_t actual_injected_count = 0;
         bool result = TrampolineInjector::inject_trampoline_to_multiple_functions_smart(
             input_pe_path, output_pe_path, function_rvas, function_names,
-            actual_injected_count);
+            actual_injected_count, function_sizes);
 
         if (!result) {
             std::cerr << "Manual Injection failed!\n";
@@ -1464,7 +1180,8 @@ bool TrampolineInjector::inject_trampoline_to_multiple_functions_smart(
     const std::string& output_pe_path,
     const std::vector<uint32_t>& function_rvas,
     const std::vector<std::string>& function_names,
-    uint32_t& actual_injected_count)
+    uint32_t& actual_injected_count,
+    const std::vector<uint32_t>& function_sizes)
 {
     TrampolineInjector injector;
 
@@ -1472,7 +1189,7 @@ bool TrampolineInjector::inject_trampoline_to_multiple_functions_smart(
         return false;
     }
 
-    if (!injector.inject_multiple_function_trampolines_with_limit(function_rvas, function_names, actual_injected_count)) {
+    if (!injector.inject_multiple_function_trampolines_with_limit(function_rvas, function_names, actual_injected_count, function_sizes)) {
         return false;
     }
 
@@ -1499,7 +1216,8 @@ bool TrampolineInjector::save_pe(const std::string& output_path) {
 bool TrampolineInjector::inject_trampoline_to_function(
     const std::string& input_pe_path,
     const std::string& output_pe_path,
-    uint32_t function_rva)
+    uint32_t function_rva,
+    uint32_t function_size)
 {
     TrampolineInjector injector;
 
@@ -1507,7 +1225,7 @@ bool TrampolineInjector::inject_trampoline_to_function(
         return false;
     }
 
-    if (!injector.inject_function_trampoline(function_rva)) {
+    if (!injector.inject_function_trampoline(function_rva, function_size)) {
         return false;
     }
 

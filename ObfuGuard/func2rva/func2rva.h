@@ -1,20 +1,16 @@
-﻿#pragma once
+#pragma once
 #include <string>
 #include <vector>
 #include <cstdint>
 #include <memory>
 #include "../pe/pe.h"
 #include "../pdbparser/pdbparser.h"
+#include "../common/function_info.h"
 
 namespace FuncToRVA {
 
-    // Information about a resolved function
-    struct FunctionInfo {
-        std::string name;       // Function name
-        uint32_t rva;           // Calculated RVA (e.g., text_section_rva + pdb_offset)
-        uint32_t pdb_offset;    // Original offset from PDB
-        uint32_t size;          // Function size from PDB
-    };
+    // Canonical function descriptor (shared with ObfuGuard discovery/filter)
+    using FunctionInfo = ObfuGuard::FunctionInfo;
 
     // Class to resolve function RVA from PE file and PDB
     class RVAResolver {
