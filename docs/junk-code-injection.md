@@ -1,251 +1,162 @@
-# Junk Code Injection with Trampoline
+# Junk Code Injection (Trampoline)
 
 ## Overview
 
-Junk Code Injection is an obfuscation technique that increases binary complexity by inserting semantically neutral instructions between the original program instructions. Combined with the trampoline technique, original function bodies are relocated to new PE sections, leaving trampoline jumps at the original locations.
+Junk injection increases instruction noise and scatters real logic into **new PE sections**. Each selected function is:
 
-## How It Works
+1. **Copied** (with relative fixups) into a dedicated section  
+2. **Hooked** at the original RVA with a **trampoline** (`jmp` to the new VA), padded with neutral junk / multi-byte NOPs  
 
-### Before Obfuscation
+**Support:** 32-bit and 64-bit PE · LIEF + Capstone + Keystone · modules: `junkcode/`, `common/`
 
-```
-.text section:
-  [function @ RVA 0x12380]
-    push rbp
-    mov rbp, rsp
-    sub rsp, 0x20
-    call some_func
-    add rsp, 0x20
-    pop rbp
-    ret
-```
+PoC screenshots: `PoC/junkcode/`.
 
-### After Obfuscation
+## Concept
 
 ```
-.text section:
-  [function @ RVA 0x12380]
-    jmp new_section         ; Trampoline jump
-    nop; nop; nop; ...      ; NOP padding
-
-new section:
-  [relocated function]
-    push rbp
-    mov rdx, rdx            ; <-- junk
-    mov rbp, rsp
-    lea rbx, [rbx]          ; <-- junk
-    sub rsp, 0x20
-    xor r9, 0x5678          ; <-- junk
-    xor r9, 0x5678          ; <-- junk (reverses above)
-    call some_func          ; address fixed for new location
-    add rsp, 0x20
-    add r8, 0x10            ; <-- junk
-    sub r8, 0x10            ; <-- junk (reverses above)
-    pop rbp
-    ret
+.text @ original RVA                    new section ".xxxxN"
+─────────────────────                   ────────────────────
+ [ junk? ]                               push rbp
+ [ E9 rel32  ──────────────► ]           mov rdx, rdx     ; junk
+ [ dead junk / NOP pad ]                 mov rbp, rsp
+                                         ...
+                                         ret
 ```
 
-## Technical Pipeline
+Execution always enters at the original RVA, then jumps to the relocated body.
 
-### Step 1: PE Loading
+## Pipeline
 
-The binary is loaded using LIEF for PE manipulation:
-
-```cpp
-TrampolineInjector injector;
-injector.load_pe(input_pe_path);
-```
-
-LIEF provides full PE parsing and rebuilding capabilities, including section management and header updates.
-
-### Step 2: Function Discovery (Auto Mode)
-
-In auto mode, `ObfuGuard::FunctionDiscovery` loads PE + PDB once:
+### 1. Discover functions
 
 ```cpp
 ObfuGuard::FunctionDiscovery discovery(input_pe_path);
-const auto& functions = discovery.get_functions();
+auto all = discovery.get_functions(); // name, pdb_offset, rva, size
 ```
 
-Each function's RVA is calculated as:
+RVA is computed as:
+
 ```
-RVA = text_section_rva + pdb_offset
+rva = .text.VirtualAddress + pdb_offset
 ```
 
-### Step 3: Function Filtering
+### 2. Filter
 
-Filtering is centralized in `ObfuGuard::function_filter` (`common/function_filter.*`).
+Shared filter: `ObfuGuard::filter_functions` / blacklist helpers.
 
-**Size filter:**
-- Minimum function size: 5–6 bytes (room for a `jmp rel32`)
+| Rule | Auto mode | Manual mode |
+|------|-----------|-------------|
+| Min size | ≥ 6 bytes | ≥ 5 bytes |
+| Blacklist | Yes | Yes |
+| Sort | Size descending | User order (after filter) |
 
-**Configurable blacklist file:**
+### Function blacklist
 
-Ship `ObfuGuard/blacklist_default.txt` (one name per line, `#` comments). At runtime the tool tries:
+**File:** `ObfuGuard/blacklist_default.txt` (optional at runtime)
 
-1. `blacklist_default.txt` in the working directory
-2. `ObfuGuard/blacklist_default.txt`
-3. Next to the target PE path
+```
+# comments and blank lines ignored
+mainCRTStartup
+memcpy
+big:std::filesystem::exists
+```
 
-If no file is found, built-in CRT/runtime defaults are used. Optional `big:Name` lines add large-binary-only exclusions.
+| Form | Meaning |
+|------|---------|
+| `Name` | Always skip |
+| `big:Name` | Skip only if PE size > **350 KB** |
 
-**Name heuristics (always applied):**
-- Names containing `` ` `` or `_` mid-string patterns, or starting with `_`
-- Names starting with `??_` (MSVC RTTI / specials)
+Search order (first hit wins for loading extras): CWD, `ObfuGuard/blacklist_default.txt`, next to target PE. If none load, **built-in** CRT/runtime sets are used.
 
-**Large binary filter (> 350 KB):** additional names from the big-binary set
+**Heuristics (always):**
 
-**Sort order:** Functions are sorted by size in descending order for priority injection.
+- Name contains `` ` ``  
+- Name starts with `_`  
+- Prefix `??_` (MSVC specials)  
 
-### Step 4: Section Creation
+Mid-name underscores (e.g. `sum_to_n`) are **allowed**.
 
-For each function, a new PE section is created:
+### 3. Section budget
+
+PE practically allows **96** sections. ObfuGuard keeps a safety margin:
+
+```
+max_injectable = PE_MAX_SECTIONS - PE_SECTION_SAFETY_MARGIN
+                 - PE_RESERVED_SYSTEM_SECTIONS - current_sections
+```
+
+Auto/smart inject takes the top N functions that fit.
+
+### 4. Batch inject (performance)
+
+`TrampolineInjector::inject_multiple_function_trampolines`:
+
+| Phase | Work |
+|-------|------|
+| **1** | For each function: disassemble/relocate with provisional VA, create section, set content size |
+| **2** | **Single** LIEF `Builder::build()` to assign final section VAs |
+| **3** | Re-relocate with real VAs, write content, install trampolines |
+
+Capstone and Keystone engines are **reused** for the whole injector lifetime.
+
+### 5. Relocation details
+
+`get_and_relocate_original_function_code(..., known_function_size)`:
+
+- Prefer **PDB size** as the copy bound (continues past early `ret`)  
+- If size unknown: scan until first `ret` (legacy fallback)  
+- Cap with `MAX_FUNC_SCAN_SIZE` (8192)  
+- Fix:
+  - `E8`/`E9` rel32 call/jmp  
+  - RIP-relative memory operands (64-bit)  
+
+### 6. Trampoline layout
+
+At original VA (length = processed original size, capped by `MAX_TRAMPOLINE_PATCH_SIZE`):
+
+1. Random-length junk region (before)  
+2. **`E9` + rel32** to new body  
+3. Remaining space: junk / multi-byte NOPs  
+
+Junk patterns are self-canceling (e.g. `add r8, imm; sub r8, imm`, `rol`/`ror` pairs, `push`/`pop` pairs). Pool differs for 32-bit vs 64-bit.
+
+### 7. Save
 
 ```cpp
-bool create_new_section(const std::string& section_name, uint32_t initial_size = 0x1000);
+injector.save_pe(output_pe_path); // final LIEF build + write → *.junk.exe
 ```
 
-Section names are generated as unique identifiers based on the function name and index.
+## Modes (CLI)
 
-**Section limit management:**
-- PE format maximum: 96 sections
-- Safety margin maintained
-- `calculate_max_injectable_functions()` determines how many functions can be processed
+| Sub-mode | Class entry |
+|----------|-------------|
+| Auto | `JunkCodeManager::run_auto_injection_mode` |
+| Manual | `JunkCodeManager::run_manual_injection_mode` |
 
-### Step 5: Code Relocation
+Both receive a pre-discovered `vector<ObfuGuard::FunctionInfo>` so PDB is not reopened unnecessarily for discovery (filter may still load blacklist files).
 
-The original function code is disassembled with Capstone and relocated. When PDB size is known, the full function span is copied (does **not** stop at the first early `RET`). If size is unknown, the tool falls back to scanning until the first `RET` (capped by `MAX_FUNC_SCAN_SIZE`).
+## Limits and caveats
 
-```cpp
-bool get_and_relocate_original_function_code(
-    uint64_t original_func_va,
-    uint64_t new_func_base_va,
-    std::vector<uint8_t>& relocated_code_buffer,
-    size_t& determined_original_function_size,
-    size_t known_function_size = 0  // PDB size when available
-);
-```
+| Topic | Notes |
+|-------|--------|
+| Section count | Hard cap; remaining functions are skipped |
+| Exception handling | Moving code can break EH tables for some functions |
+| Position-dependent assumptions | Rare absolute address tables may need care |
+| Random / time-based programs | `match_check` may differ even when logic is “correct” |
+| Logging | Default: one summary line per function (not full hex dumps) |
 
-**Address fixups during relocation:**
-- `CALL rel32` - Recalculate 32-bit relative displacement for new location
-- `JMP rel32` - Recalculate 32-bit relative displacement for new location
-- RIP-relative operands (e.g., `mov rax, [rip+0x1234]`) - Recalculate displacement to maintain correct data reference
+## Related sources
 
-### Step 6: Trampoline Creation
+| Path | Role |
+|------|------|
+| `ObfuGuard/junkcode/junkcode.*` | Injector + manager |
+| `ObfuGuard/common/function_filter.*` | Blacklist + interactive select |
+| `ObfuGuard/common/function_discovery.*` | PE+PDB load |
+| `ObfuGuard/blacklist_default.txt` | Default names |
+| `ObfuGuard/constants.h` | Limits and thresholds |
 
-The original function location is replaced with:
+## See also
 
-```cpp
-bool create_trampoline(uint64_t original_func_va, uint64_t new_func_va, size_t original_size);
-```
-
-Layout at original location:
-```
-[junk instructions] [JMP rel32 to new section] [junk instructions] [NOP padding]
-```
-
-### Step 7: Junk Instruction Insertion
-
-Junk instructions are randomly selected from a pool of ~50 patterns (64-bit) or ~20 patterns (32-bit).
-
-**64-bit junk instruction examples:**
-
-| Category | Example | Effect |
-|----------|---------|--------|
-| Identity moves | `mov rax, rax` | No-op |
-| LEA identity | `lea rbx, [rbx]` | No-op |
-| Self-cancel pair | `add r8, 0x10; sub r8, 0x10` | Net zero |
-| Self-cancel pair | `xor r9, 0x5678; xor r9, 0x5678` | Net zero |
-| Push/pop pair | `push rdi; pop rdi` | Net zero |
-| Flag preservation | `pushfq; popfq` | No-op |
-| Zero register trick | `xor r10, r10; or r10, r10` | Sets r10 to 0 (may affect flags) |
-
-**32-bit junk instruction examples:**
-
-| Category | Example | Effect |
-|----------|---------|--------|
-| Identity moves | `mov eax, eax` | No-op |
-| Self-cancel pair | `add ecx, 0x10; sub ecx, 0x10` | Net zero |
-| NOP variants | `nop` | No-op |
-| Push/pop pair | `push edi; pop edi` | Net zero |
-
-### Step 8: NOP Padding
-
-Remaining space in original function locations is filled with multi-byte NOP sequences:
-
-```cpp
-void fill_remaining_space_with_nops(uint64_t address, size_t size);
-```
-
-NOP sizes from 1 to 9 bytes are used, with larger NOPs preferred for efficiency:
-- 1 byte: `90`
-- 2 bytes: `66 90`
-- 3 bytes: `0F 1F 00`
-- 4 bytes: `0F 1F 40 00`
-- ...up to 9 bytes
-
-### Step 9: PE Rebuild and Save
-
-The modified binary is rebuilt and saved using LIEF:
-
-```cpp
-injector.save_pe(output_pe_path);
-```
-
-LIEF handles all PE header updates, section table modifications, and size recalculations.
-
-## Effect on Static Analysis
-
-### Original (IDA View)
-```nasm
-sub_12380:
-    push    rbp
-    mov     rbp, rsp
-    sub     rsp, 20h
-    lea     rcx, aHelloWorld
-    call    printf
-    add     rsp, 20h
-    pop     rbp
-    retn
-```
-
-### After Obfuscation
-
-**At original RVA:**
-```nasm
-sub_12380:
-    jmp     loc_new_section
-    nop
-    nop
-    nop
-    ...
-```
-
-**At new section:**
-```nasm
-loc_new_section:
-    push    rbp
-    mov     rdx, rdx        ; junk
-    mov     rbp, rsp
-    lea     rbx, [rbx]      ; junk
-    sub     rsp, 20h
-    xor     r9, 5678h       ; junk
-    xor     r9, 5678h       ; junk
-    lea     rcx, aHelloWorld
-    add     r8, 10h         ; junk
-    sub     r8, 10h         ; junk
-    call    printf
-    add     rsp, 20h
-    pushfq                  ; junk
-    popfq                   ; junk
-    pop     rbp
-    retn
-```
-
-## Limitations
-
-- **PE section limit** - Each injected function creates a new section; max ~90 functions depending on existing sections
-- **Function size minimum** - Functions smaller than 5 bytes cannot be injected (no room for `jmp rel32`)
-- **CRT functions** - System and runtime functions are blacklisted to prevent crashes
-- **Code analysis tools** - Sophisticated tools may detect and filter junk instructions; this technique is best combined with CFF
-- **Binary size growth** - Each new section adds overhead; very aggressive injection can significantly increase file size
+- [control-flow-flattening.md](control-flow-flattening.md)  
+- [user-guide.md](user-guide.md)  
+- [testing.md](testing.md)  

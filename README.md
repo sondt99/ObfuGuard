@@ -1,9 +1,46 @@
 # ObfuGuard
 
-## REQUIREMENT
-- Library: asmjit, zydis, keystone, capstone, lief
+**Windows PE binary obfuscation tool** for research and software protection.
 
-```bash
+ObfuGuard transforms compiled 64-bit (and, for junk mode, 32-bit) Portable Executable files at the machine-code level. It increases reverse-engineering cost while aiming to preserve program behavior. It needs a matching **PDB** for function discovery.
+
+| | |
+|---|---|
+| **Version** | 4.1.x |
+| **License** | MIT |
+| **Platform** | Windows x64 (MSVC v143 / VS 2022) |
+| **Author** | [sondt99](https://github.com/sondt99) |
+
+---
+
+## Features
+
+| Mode | What it does | PE arch |
+|------|----------------|---------|
+| **Control Flow Flattening (CFF)** | Basic blocks → shuffled dispatcher state machine (`rax` / flags preserved) | **64-bit only** |
+| **Junk Code + Trampoline** | Relocate functions to new sections; trampoline + neutral junk at original RVA | **32-bit and 64-bit** |
+
+Also included:
+
+- Shared **function discovery** (`PE + PDB`) for both modes  
+- **Blacklist** of CRT/runtime symbols (file-configurable + built-in defaults)  
+- Jump-table detection (CFF skips unsafe functions)  
+- Section-limit awareness for junk injection  
+- Benchmark and behavioral test suite under `benchmark/` and `binary_test/`  
+- Hardened PE parsing, CFG/CET-friendly build flags (see `CHANGELOG.md`)
+
+---
+
+## Requirements
+
+- **Windows 10/11** (x64)  
+- **Visual Studio 2022** — Desktop development with C++ (MSVC v143)  
+- **[vcpkg](https://github.com/microsoft/vcpkg)** integrated with VS  
+- Target **`.exe` + matching `.pdb`** (same directory / name when possible)
+
+### Libraries (vcpkg)
+
+```powershell
 vcpkg install capstone:x64-windows
 vcpkg install keystone:x64-windows
 vcpkg install lief:x64-windows
@@ -11,134 +48,199 @@ vcpkg install asmjit:x64-windows
 vcpkg install zydis:x64-windows
 ```
 
-- PE file and PDB file of the program to be obfuscated.
+| Library | Role |
+|---------|------|
+| Zydis | Disassembly (CFF) |
+| AsmJit | Code generation helpers (CFF) |
+| Capstone | Disassembly + reloc (junk) |
+| Keystone | Assemble junk snippets |
+| LIEF | PE rewrite (junk) |
+| DbgHelp | PDB symbols (Windows SDK) |
 
+---
 
-## Control Flow Flattening
+## Build
 
-
-### Technique
-
-- Traverse all instructions of the function to create blocks. Blocks are built starting from destination points of conditional jump instructions. The end of blocks will be natural termination points: either a jump instruction that is not a function call, or a ret instruction, or a destination point from conditional jump instructions.
-
-- Traverse all blocks, if the last instruction of a block is a conditional jump, set the position of the block that the conditional jump jumps to in block_dst. Set the next_block attribute of the current block to current_block_id+1.
-
-- Shuffle the vector containing the blocks. Use rax as a state variable to transfer flow through dispatcher and create control structure to perform flow flattening.
-
-
-### PoC
-
-
-![before cff](/PoC/cff/before.png)
-
-- Before flattening, the function has basic flow structure as above: A->B or C -> D. The goal of this flow flattening is to create a control structure that transfers flow between blocks A,B,C,D through dispatcher instead of the original linear flow execution with unchanged effectiveness. The target to be achieved is as follows:
-
-![target](/PoC/cff/target.png)
-
-- After performing flow flattening, load the entire obtained PE file into IDA software to check the results.
-
-![CFG after flattening](/PoC/cff/CFG_after.png)
-
-
-- Based on the obtained Control-flow graph, the program structure has been transformed through the state variable which is the rax register, and continuously transfers flow through instructions `cmp eax,0`, `cmp eax,2`, `cmp eax,3`, `cmp eax,1`. Tracing the flows corresponding to eax leads to block A, block B, Block C, Block D as expected.
-
-
-- Continue to verify the program effectiveness through the pseudocode obtained when decompiling:
-
-```C
-__int64 __fastcall sub_1400292F5(char a1)
-{
-  __int64 v5; // rax
-  _QWORD *v6; // rbp
-  __int64 v7; // rdi
-  int v8; // eax
-  _QWORD v15[26]; // [rsp-D0h] [rbp-1A8h] BYREF
-  __int64 v16; // [rsp+0h] [rbp-D8h]
-  char v17; // [rsp+10h] [rbp-C8h]
-
-  v16 = v5;
-  __asm { pushf }
-  v8 = 0;
-  while ( 1 )
-  {
-    while ( v8 == 2 )
-    {
-      __asm { popf }
-      v16 = sub_140011217();
-      __asm { pushf }
-      v8 = 3;
-    }
-    if ( v8 )
-      break;
-    __asm { popf }
-    v17 = a1;
-    v16 = (__int64)v6;
-    v15[25] = v7;
-    v6 = v15;
-    ((void (__fastcall *)(void *))sub_1400113F7)(&unk_140023076);
-    ((void (__fastcall *)(_QWORD, const char *))sub_140011087)(std::cout, "Block A\n");
-    _CF = 0;
-    _OF = 0;
-    _ZF = v17 == 0;
-    _SF = 0;
-    if ( v17 )
-    {
-      __asm { pushf }
-      v8 = 1;
-    }
-    else
-    {
-      __asm { pushf }
-      v8 = 2;
-    }
-  }
-  if ( v8 == 3 )
-  {
-    __asm { popf }
-    return v16;
-  }
-  else
-  {
-    __asm { popf }
-    return sub_1400112C1();
-  }
-}
+```powershell
+git clone https://github.com/sondt99/ObfuGuard.git
+cd ObfuGuard
+# Open ObfuGuard.sln → Configuration: Release | Platform: x64 → Build
 ```
- 
-- Based on the obtained pseudocode, the program structure also easily shows changes. With the state variable v8 (representing rax), the if statements check the values of the state variable to transfer flow into block A, sub_1400112c1 (), sub_140011217() and return. When tracing along this flow, the result shows that this program structure performs flow transfer through variable v8 to blocks A, block B, block C, block D as expected.
 
+Output: `x64\Release\ObfuGuard.exe` (plus dependency DLLs from vcpkg app-local copy).
 
+Full steps: [docs/installation.md](docs/installation.md).
 
+---
 
+## Quick start
 
-## Junk Code Injection
-### Techique
+```powershell
+.\x64\Release\ObfuGuard.exe
+```
 
-- Background technique - Trampoline: trampoline technique performs changing program flow through indirect jumping functions to the source code part that needs to be executed.
+```
+========================================
+         ObfuGuard Tool - sondt
+========================================
 
-- First, to create space for inserting junk instructions, the program will use trampoline technique to relocate the original function of the selected function to a newly created section to perform junk code insertion. Relocating the original function to a new section will allow the program to intervene more in inserting into functions without affecting the structure of the remaining parts of the binary.
+Select obfuscation mode:
+  1. Control Flow Flattening
+  2. Insert Junk Code - Trampoline
+  0. Exit
+```
 
-- The program creates a new empty section as memory area where the function to be obfuscated will be relocated to. Read all instructions in the selected function into buffer; turn the memory area of the initially selected function into an indirect jump function to the beginning of the newly created section area (trampoline technique).
+1. Choose **1** (CFF) or **2** (junk).  
+2. Enter the path to the PE (quotes allowed for drag-and-drop).  
+3. For junk mode, choose **auto** or **manual** function selection.  
+4. Output is written next to the input:
+   - CFF → `name.cff.exe`  
+   - Junk → `name.junk.exe`
 
-- The program traverses the buffer and writes code from the buffer into the newly created section. For each instruction written from the buffer, one or more junk code instructions randomly selected from the program's junk code collection are written after it. When finished, the original function has been inserted between junk code segments.
+Detailed walkthrough: [docs/user-guide.md](docs/user-guide.md).
 
+---
 
-### PoC
+## How it works (high level)
 
-![before junkcode](PoC/junkcode/junkcode_before.png)
+```
+  target.exe + target.pdb
+            │
+            ▼
+   FunctionDiscovery  ──► PE (pe64) + PDB (DbgHelp)
+            │
+            ▼
+   FunctionFilter     ──► size + blacklist (CRT / runtime)
+            │
+     ┌──────┴──────┐
+     ▼             ▼
+  CFF engine    Junk / trampoline
+  (Zydis)       (Capstone + Keystone + LIEF)
+     │             │
+     ▼             ▼
+  .0Cff section  per-function sections + trampolines
+     │             │
+     └──────┬──────┘
+            ▼
+     *.cff.exe / *.junk.exe
+```
 
-- Before performing junk code insertion, the function binary is located at RVA 0x12380. All instructions of the function are very clear and logically continuous. The goal of junk code insertion is that after inserting junk code, the function will have junk instructions inserted between the original binary instructions. These instructions increase the difficulty of software reverse engineering but are completely harmless to the overall program logic.
+### Control Flow Flattening
 
-- After performing junk code insertion, load the obtained PE into IDA software to verify effectiveness:
+1. Discover and filter functions.  
+2. Disassemble with Zydis; split basic blocks.  
+3. Shuffle blocks; build a **dispatcher** using a state in `eax`/`rax` and `pushf`/`popf`.  
+4. Relocate flattened code into a new **`.0Cff`** section; leave `jmp` stubs in `.text`.  
+5. Optionally encode entry-point metadata for research entry-point tricks.
 
+### Junk + trampoline
 
-![origin_rva_after](PoC/junkcode/origin_rva_after.png)
+1. Discover and filter functions (auto: size-sorted; manual: interactive).  
+2. Cap how many functions run by PE **section limit** (~96 with safety margin).  
+3. Relocate each body (prefer **PDB size**, not first-`RET` only).  
+4. Patch original site with junk + **`jmp rel32`** trampoline.  
+5. **One** LIEF layout build for the batch (performance).
 
-- At the original RVA of the selected function, it can be seen that the code segment in the function is simply a jump instruction to the new section. All remaining parts of the function are patched with nop instructions according to the trampoline technique. Tracing this jmp instruction shows that the original function code has been successfully relocated to the new section area exactly as the trampoline technique.
+Technical detail: [docs/control-flow-flattening.md](docs/control-flow-flattening.md), [docs/junk-code-injection.md](docs/junk-code-injection.md).
 
-![binary after](PoC/junkcode/binary_after.png)
+---
 
-- At the section area where the original function was relocated to, it can be seen that the binary of the original function has been inserted between many junk instructions that do not affect the overall program logic such as `mov rdx, rdx`, `lea rbx, rbx`,... These instructions do not affect program logic but confuse the binary code for analysts. The obfuscating effectiveness of the obtained file is as expected.
+## Proof of concept
 
+### CFF
 
+| Before | Target | After (IDA CFG) |
+|--------|--------|-----------------|
+| ![before](PoC/cff/before.png) | ![target](PoC/cff/target.png) | ![CFG](PoC/cff/CFG_after.png) |
 
+### Junk / trampoline
+
+| Before | Trampoline site | Relocated + junk |
+|--------|-----------------|------------------|
+| ![before](PoC/junkcode/junkcode_before.png) | ![origin](PoC/junkcode/origin_rva_after.png) | ![after](PoC/junkcode/binary_after.png) |
+
+---
+
+## Project layout
+
+```
+ObfuGuard/
+├── ObfuGuard.sln
+├── ObfuGuard/                 # C++20 tool sources
+│   ├── main.cpp               # CLI
+│   ├── constants.h
+│   ├── blacklist_default.txt
+│   ├── common/                # FunctionDiscovery, FunctionFilter, FunctionInfo
+│   ├── pe/                    # pe64 manual PE map + section create
+│   ├── pdbparser/             # DbgHelp PDB
+│   ├── obfuscatecff/          # CFF engine
+│   ├── cfflattening/          # Flattening algorithm
+│   ├── junkcode/              # TrampolineInjector + JunkCodeManager
+│   └── func2rva/              # Interactive RVA helpers
+├── binary_test/               # ~60 programs + auto_test / match_check
+├── benchmark/                 # Static / runtime / RE-time scripts
+├── docs/                      # Full documentation
+├── PoC/                       # Screenshots
+├── CHANGELOG.md
+└── SECURITY.md
+```
+
+Architecture: [docs/architecture.md](docs/architecture.md).
+
+---
+
+## Documentation
+
+| Doc | Description |
+|-----|-------------|
+| [docs/README.md](docs/README.md) | Doc index |
+| [Overview](docs/overview.md) | Goals, scope, features |
+| [Installation](docs/installation.md) | VS, vcpkg, build |
+| [User guide](docs/user-guide.md) | CLI usage |
+| [CFF](docs/control-flow-flattening.md) | Flattening pipeline |
+| [Junk code](docs/junk-code-injection.md) | Trampoline + junk |
+| [Architecture](docs/architecture.md) | Modules and data flow |
+| [API reference](docs/api-reference.md) | Public classes / APIs |
+| [Testing](docs/testing.md) | `binary_test` suite |
+| [Benchmarking](docs/benchmarking.md) | Evaluation scripts |
+| [FAQ](docs/faq.md) | Troubleshooting |
+
+---
+
+## Testing
+
+```powershell
+cd binary_test
+# Optional: $env:OBFUGUARD_EXE = "D:\path\to\ObfuGuard.exe"
+python auto_test.py      # run CFF + junk on suite
+python match_check.py    # compare stdout vs original
+```
+
+Paths are repo-relative; override with `OBFUGUARD_EXE`. Details: [docs/testing.md](docs/testing.md).
+
+---
+
+## Security & ethics
+
+- Use only on binaries you own or are authorized to modify.  
+- Obfuscated PE files may trigger AV/EDR false positives.  
+- Do not use ObfuGuard to hide malware.  
+
+Reporting: [SECURITY.md](SECURITY.md).
+
+---
+
+## Changelog
+
+See [CHANGELOG.md](CHANGELOG.md) (Semantic Versioning). Recent highlights (v4.x):
+
+- Symmetric discovery/filter pipeline for CFF and junk  
+- Safer PE validation and section creation  
+- PDB-sized junk relocation; batch LIEF rebuild  
+- Configurable blacklist file + CFF eligibility filtering  
+
+---
+
+## License
+
+MIT License — Copyright (c) 2025 Thai Son Dinh (sondt). See [LICENSE](LICENSE).

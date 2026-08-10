@@ -1,7 +1,23 @@
-## Tool Installation Guide
+# ObfuGuard tutorial (short)
 
-1. Download the tool and extract
-2. Download necessary libraries through vcpkg as mentioned in the project
-3. Download Visual Studio 2022 and Desktop Development with C++ (Installer)
-4. Run the project by opening ObfuGuard.sln file
-5. Build the tool and export the tool executable file
+This file is a pointer. Full documentation lives under **`docs/`**.
+
+| Step | Document |
+|------|----------|
+| Install VS + vcpkg + build | [docs/installation.md](docs/installation.md) |
+| Run CFF / junk modes | [docs/user-guide.md](docs/user-guide.md) |
+| How CFF works | [docs/control-flow-flattening.md](docs/control-flow-flattening.md) |
+| How junk works | [docs/junk-code-injection.md](docs/junk-code-injection.md) |
+| Project landing | [README.md](README.md) |
+
+## Minimal run
+
+```powershell
+# After Release|x64 build
+.\x64\Release\ObfuGuard.exe
+# 1 = Control Flow Flattening (x64 PE + PDB)
+# 2 = Junk + trampoline (x86/x64 PE + PDB)
+# 0 = Exit
+```
+
+Output: `input.cff.exe` or `input.junk.exe` beside the input PE.

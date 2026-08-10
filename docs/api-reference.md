@@ -1,425 +1,244 @@
 # API Reference
 
-## pe64 Class
+Public-facing types used by ObfuGuard’s own modules. There is no installed library package; headers live under `ObfuGuard/`.
+
+---
+
+## Namespace `ObfuGuard`
+
+### `struct FunctionInfo`
+
+**Header:** `common/function_info.h`
+
+```cpp
+struct FunctionInfo {
+    std::string name;
+    uint32_t pdb_offset;
+    uint32_t rva;
+    uint32_t size;
+};
+```
+
+Canonical function descriptor for discovery, filtering, and junk injection.
+
+### `class FunctionDiscovery`
+
+**Header:** `common/function_discovery.h`
+
+```cpp
+explicit FunctionDiscovery(const std::string& pe_path);
+
+const std::vector<FunctionInfo>& get_functions() const;
+uint32_t get_text_section_rva() const;
+uint64_t get_image_base() const;
+```
+
+Loads PE via `pe64`, opens PDB via `pdbparser`, fills `FunctionInfo` list.
+
+**Throws:** `std::runtime_error` on PE/PDB failure.
+
+### Function filter API
+
+**Header:** `common/function_filter.h`
+
+```cpp
+bool load_blacklist_file(const std::string& path);
+void ensure_blacklist_loaded(const std::string& binary_path = "");
+
+std::vector<FunctionInfo> filter_functions(
+    const std::vector<FunctionInfo>& all_functions,
+    const std::string& binary_path,
+    uint32_t min_size = 5);
+
+void sort_functions_by_size_desc(std::vector<FunctionInfo>& functions);
+
+bool is_function_blacklisted(const std::string& func_name);
+bool is_function_blacklisted_by_binary_size(
+    const std::string& func_name, const std::string& binary_path);
+
+bool select_functions_interactive(
+    const std::vector<FunctionInfo>& all_functions,
+    std::vector<uint32_t>& out_rvas,
+    std::vector<std::string>& out_names);
+```
+
+---
+
+## `class pe64`
 
 **Header:** `pe/pe.h`
 
-PE64 file parser and manipulator.
-
-### Constructor
+Manual PE32+ loader used by CFF and discovery.
 
 ```cpp
 pe64(std::string binary_path);
-```
-Loads a 64-bit PE binary into memory, validates PE headers, and maps sections to virtual addresses.
 
-**Parameters:**
-- `binary_path` - Path to the PE executable file
-
-**Throws:** `std::runtime_error` if the file cannot be opened or is not a valid PE file.
-
-### Methods
-
-```cpp
-uint32_t align(uint32_t address, uint32_t alignment);
-```
-Aligns an address to the specified boundary.
-
----
-
-```cpp
-std::vector<uint8_t>* get_buffer();
-```
-Returns pointer to the relocated PE buffer (sections mapped to virtual addresses).
-
----
-
-```cpp
-std::vector<uint8_t>* get_buffer_not_relocated();
-```
-Returns pointer to the raw PE buffer (as stored on disk).
-
----
-
-```cpp
+uint32_t align(uint32_t address, uint32_t alignment) const;
+std::vector<uint8_t>* get_buffer();                 // VA-mapped image
+std::vector<uint8_t>* get_buffer_not_relocated(); // raw file bytes
 PIMAGE_NT_HEADERS get_nt();
-```
-Returns pointer to the NT headers within the buffer.
-
----
-
-```cpp
 PIMAGE_SECTION_HEADER get_section(std::string sectionname);
+PIMAGE_SECTION_HEADER create_section(
+    std::string name, uint32_t size, uint32_t characteristic);
+void save_to_disk(
+    std::string path, PIMAGE_SECTION_HEADER new_section, uint32_t total_size);
+std::string get_path() const;
 ```
-Finds and returns a section header by name. Returns `nullptr` if not found.
+
+**Constructor validation includes:** MZ, PE signature, 64-bit optional header, AMD64 machine, `SizeOfImage` bounds, section table bounds.
+
+**`create_section`:** rejects empty section table, `NumberOfSections >= PE_MAX_SECTIONS`, insufficient header space, image size overflow.
 
 ---
 
-```cpp
-PIMAGE_SECTION_HEADER create_section(std::string name, uint32_t size, uint32_t characteristic);
-```
-Creates a new PE section with the specified name, size, and characteristics.
-
-**Parameters:**
-- `name` - Section name (max 8 characters)
-- `size` - Section size in bytes
-- `characteristic` - Section flags (e.g., `IMAGE_SCN_MEM_EXECUTE | IMAGE_SCN_MEM_READ`)
-
-**Returns:** Pointer to the new section header.
-
----
-
-```cpp
-void save_to_disk(std::string path, PIMAGE_SECTION_HEADER new_section, uint32_t total_size);
-```
-Saves the modified PE to disk with the new section included.
-
----
-
-```cpp
-std::string get_path();
-```
-Returns the path of the loaded PE file.
-
----
-
-## pdbparser Class
+## `class pdbparser`
 
 **Header:** `pdbparser/pdbparser.h`
 
-Parses PDB debug symbols to extract function information.
-
-### Types
-
 ```cpp
 struct sym_func {
-    int id = -1;           // Function ID
-    uint32_t offset = 0;   // Offset within .text section
-    std::string name;      // Symbol name
-    uint32_t size = 0;     // Function size in bytes
-    bool obfuscate = true; // Whether to obfuscate
-    bool ctfflattening = true; // Whether to apply CFF
+    int id = -1;
+    uint32_t offset = 0;
+    std::string name;
+    uint32_t size = 0;
+    bool obfuscate = true;
+    bool cff_flattening = true;
 };
-```
 
-### Constructor / Destructor
-
-```cpp
-pdbparser(pe64* pe);
+explicit pdbparser(pe64* pe);
 ~pdbparser();
-```
-Initializes the PDB parser using the PE file's debug directory to locate the PDB file. Falls back to name-based convention if the debug directory does not contain a PDB path.
-
-### Methods
-
-```cpp
 std::vector<sym_func> parse_functions();
 ```
-Parses all function symbols from the PDB and returns them as a vector. Uses `SymInitialize` and `SymEnumSymbols` from the Windows DbgHelp library.
+
+Uses DbgHelp. Load base: `ObfuGuard::SYM_LOAD_BASE_ADDRESS`.
 
 ---
 
-## obfuscatecff Class
+## `class obfuscatecff`
 
 **Header:** `obfuscatecff/obfuscatecff.h`
 
-Orchestrates the Control Flow Flattening obfuscation pipeline.
-
-### Types
-
 ```cpp
-struct instruction_t {
-    int inst_id;
-    int func_id;
-    bool is_first_instruction;
-    std::vector<uint8_t> raw_bytes;
-    uint64_t runtime_address;
-    uint64_t relocated_address;
-    ZydisDisassembledInstruction zyinstr;
-    bool has_relative;
-    bool isjmpcall;
-    struct {
-        int target_inst_id;
-        int target_func_id;
-        uint32_t offset;
-        uint32_t size;
-    } relative;
-    uint64_t location_of_data;
+explicit obfuscatecff(pe64* pe);
 
-    void load_relative_info();
-    void load(int funcid, std::vector<uint8_t> raw_data);
-    void load(int funcid, ZydisDisassembledInstruction zyinstruction, uint64_t runtime_address);
-    void reload();
-    void print();
-};
-
-struct function_t {
-    int func_id;
-    std::string name;
-    std::vector<instruction_t> instructions;
-    std::map<int, uint64_t> inst_id_index;
-    uint32_t offset;
-    uint32_t size;
-    bool ctfflattening = true;
-    bool has_jumptables = false;
-};
-```
-
-### Constructor
-
-```cpp
-obfuscatecff(pe64* pe);
-```
-Initializes the CFF engine with a loaded PE file.
-
-### Public Methods
-
-```cpp
-void create_functions(std::vector<pdbparser::sym_func> functions);
-```
-Disassembles all functions using Zydis and builds `function_t` representations.
-
----
-
-```cpp
+void create_functions(const std::vector<pdbparser::sym_func>& functions);
 void run(PIMAGE_SECTION_HEADER new_section, bool obfuscate_entry_point);
+uint32_t get_added_size() const;
 ```
-Executes the full CFF pipeline:
-1. `analyze_functions()` - Resolve relative references
-2. `remove_jumptables()` - Mark functions with jump tables
-3. `apply_control_flow_flattening()` - Per eligible function
-4. `relocate()` - Calculate new addresses
-5. `convert_relative_jmps()` - Expand short jumps
-6. `apply_relocations()` - Patch relative offsets
-7. `compile()` - Write final code and trampolines
 
-**Parameters:**
-- `new_section` - The newly created PE section for obfuscated code
-- `obfuscate_entry_point` - Whether to apply entry point encoding
+Nested types: `instruction_t`, `function_t` (instruction list, `inst_id_index`, jumptable flag).
+
+Flattening implementation: `cfflattening/cfflattening.cpp` (member of `obfuscatecff`).
 
 ---
 
-```cpp
-uint32_t get_added_size();
-```
-Returns the total size of obfuscated code written to the new section.
+## Junk path
 
----
-
-## CFF Namespace
-
-**Header:** `cfflattening/cfflattening.h`
-
-### Types
-
-```cpp
-struct BasicBlock {
-    int block_id;
-    std::vector<obfuscatecff::instruction_t> instructions;
-    int next_block;      // Fall-through successor block ID
-    int dst_block = -1;  // Conditional jump target block ID
-};
-```
-
-### Functions
-
-```cpp
-bool CFF::apply_control_flow_flattening(
-    std::vector<obfuscatecff::function_t>::iterator& func_iter
-);
-```
-Applies the CFF algorithm to a single function. Modifies the function's instruction list in place.
-
----
-
-## TrampolineInjector Class
+### `class TrampolineInjector`
 
 **Header:** `junkcode/junkcode.h`
-
-Handles PE loading, function relocation, junk code insertion, and trampoline creation.
-
-### Constructor / Destructor
 
 ```cpp
 TrampolineInjector();
 ~TrampolineInjector();
-```
 
-### Instance Methods
-
-```cpp
 bool load_pe(const std::string& pe_path);
-```
-Loads a PE file via LIEF. Detects architecture automatically.
+bool save_pe(const std::string& output_path);
 
----
+bool inject_function_trampoline(uint32_t function_rva, uint32_t function_size = 0);
 
-```cpp
-bool inject_function_trampoline(uint32_t function_rva);
-```
-Injects a trampoline for a single function by RVA.
-
----
-
-```cpp
 bool inject_multiple_function_trampolines(
     const std::vector<uint32_t>& function_rvas,
-    const std::vector<std::string>& function_names
-);
-```
-Injects trampolines for multiple functions.
+    const std::vector<std::string>& function_names,
+    const std::vector<uint32_t>& function_sizes = {});
 
----
-
-```cpp
 bool inject_multiple_function_trampolines_with_limit(
     const std::vector<uint32_t>& function_rvas,
     const std::vector<std::string>& function_names,
-    uint32_t& actual_injected_count
-);
-```
-Injects trampolines respecting section count limits. Returns actual number injected.
+    uint32_t& actual_injected_count,
+    const std::vector<uint32_t>& function_sizes = {});
 
----
-
-```cpp
-bool save_pe(const std::string& output_path);
-```
-Saves the modified PE binary.
-
----
-
-```cpp
 uint32_t get_current_section_count() const;
 uint32_t calculate_max_injectable_functions() const;
-bool check_section_limit_before_injection(uint32_t planned_injections) const;
-```
-Section management utilities.
-
----
-
-```cpp
 bool get_is_64_bit() const;
 uint64_t get_image_base() const;
+
+// static helpers
+static bool inject_trampoline_to_function(...);
+static bool inject_trampoline_to_multiple_functions(...);
+static bool inject_trampoline_to_multiple_functions_smart(...);
 ```
-PE property accessors.
 
-### Static Methods
+`function_sizes[i]` is the PDB size for `function_rvas[i]` (0 → first-`RET` fallback).
 
-```cpp
-static bool inject_trampoline_to_function(
-    const std::string& input_pe_path,
-    const std::string& output_pe_path,
-    uint32_t function_rva,
-    bool force_64_bit = false
-);
-
-static bool inject_trampoline_to_multiple_functions(
-    const std::string& input_pe_path,
-    const std::string& output_pe_path,
-    const std::vector<uint32_t>& function_rvas,
-    const std::vector<std::string>& function_names,
-    bool force_64_bit = false
-);
-
-static bool inject_trampoline_to_multiple_functions_smart(
-    const std::string& input_pe_path,
-    const std::string& output_pe_path,
-    const std::vector<uint32_t>& function_rvas,
-    const std::vector<std::string>& function_names,
-    uint32_t& actual_injected_count,
-    bool force_64_bit = false
-);
-```
-Convenience methods that handle load, inject, and save in one call.
-
----
-
-## JunkCodeManager Class
-
-**Header:** `junkcode/junkcode.h`
-
-High-level orchestrator for junk code injection with function filtering and safety checks.
-
-### Static Methods
+### `class JunkCodeManager`
 
 ```cpp
 static int run_auto_injection_mode(
     const std::string& input_pe_path,
     const std::string& output_pe_path,
-    bool is_64_bit
-);
-```
-Automatically discovers and injects all eligible functions. Returns 0 on success.
+    bool is_64_bit,
+    const std::vector<ObfuGuard::FunctionInfo>& discovered_functions);
 
----
-
-```cpp
 static int run_manual_injection_mode(
     const std::string& input_pe_path,
     const std::string& output_pe_path,
-    bool is_64_bit
-);
+    bool is_64_bit,
+    const std::vector<ObfuGuard::FunctionInfo>& discovered_functions);
 ```
-Interactive mode for manual function selection. Returns 0 on success.
+
+Returns `0` on success, non-zero on failure.
 
 ---
 
-## FuncToRVA Namespace
+## Namespace `FuncToRVA`
 
 **Header:** `func2rva/func2rva.h`
 
-### Types
-
 ```cpp
-struct FunctionInfo {
-    std::string name;      // Function name
-    uint32_t rva;          // Calculated RVA
-    uint32_t pdb_offset;   // Original offset from PDB
-    uint32_t size;         // Function size
+using FunctionInfo = ObfuGuard::FunctionInfo;
+
+class RVAResolver {
+    explicit RVAResolver(const std::string& pe_path);
+    bool initialize();
+    const std::vector<FunctionInfo>& get_functions_info() const;
+    bool select_function_rva_interactive(uint32_t& out_rva);
+    bool select_multiple_functions_rva_interactive(
+        std::vector<uint32_t>& out_rvas, std::vector<std::string>& out_names);
 };
-```
 
-### RVAResolver Class
-
-```cpp
-RVAResolver(const std::string& pe_path);
-~RVAResolver();
-
-bool initialize();
-const std::vector<FunctionInfo>& get_functions_info() const;
-bool select_function_rva_interactive(uint32_t& out_rva);
-bool select_multiple_functions_rva_interactive(
-    std::vector<uint32_t>& out_rvas,
-    std::vector<std::string>& out_names
-);
-```
-
-### Free Functions
-
-```cpp
-bool get_rva_by_interactive_selection(
-    const std::string& pe_file_path,
-    uint32_t& selected_rva
-);
-
-bool get_multiple_rvas_by_interactive_selection(
-    const std::string& pe_file_path,
-    std::vector<uint32_t>& selected_rvas,
-    std::vector<std::string>& selected_names
-);
+bool get_rva_by_interactive_selection(...);
+bool get_multiple_rvas_by_interactive_selection(...);
 ```
 
 ---
 
-## Global Functions (main.cpp)
+## Constants (`constants.h`)
 
-```cpp
-bool DetectPEArchitecture(const std::string& filePath, bool& is64Bit);
-```
-Reads MZ/PE headers to determine if a file is 32-bit or 64-bit PE.
+| Constant | Purpose |
+|----------|---------|
+| `PE_MAX_SECTIONS` | 96 |
+| `PE_SECTION_SAFETY_MARGIN` / `PE_RESERVED_SYSTEM_SECTIONS` | Junk budget |
+| `MAX_PE_IMAGE_SIZE` | 512 MiB |
+| `CFF_SECTION_SIZE` / `CFF_SECTION_NAME` | CFF cap / `.0Cff` |
+| `CFF_DEV_SECTION_NAME` | `.0Dev` |
+| `MAX_JUNK_ITERATIONS` | Junk fill loop |
+| `MIN_TRAMPOLINE_PATCH_SIZE` / `MAX_TRAMPOLINE_PATCH_SIZE` | Trampoline span |
+| `MAX_FUNC_SCAN_SIZE` | Relocate scan cap |
+| `LARGE_BINARY_SIZE_THRESHOLD` | 350 KiB |
+| `MIN_FUNCTION_SIZE` | Default min |
+| `SYM_LOAD_BASE_ADDRESS` | PDB load base |
 
-```cpp
-std::string build_output_path(const std::string& input_path, const std::string& suffix);
-```
-Generates output file path by inserting a suffix before the extension (e.g., `.cff`, `.junk`).
+---
+
+## CLI surface
+
+Interactive only (no argv mode flags today). Entry: `main()` in `main.cpp`.
+
+| Choice | Function |
+|--------|----------|
+| `1` | `mode_control_flow_flattening()` |
+| `2` | `mode_trampoline_junkcode()` |
+| `0` | Exit |
+
+Output path helper: `build_output_path(input, ".cff"|".junk")`.

@@ -1,23 +1,24 @@
-# Installation Guide
+# Installation
 
 ## Prerequisites
 
-### Required Software
+| Requirement | Notes |
+|-------------|--------|
+| OS | Windows 10/11 **x64** |
+| IDE / toolchain | **Visual Studio 2022** with *Desktop development with C++* |
+| Toolset | MSVC **v143**, C++20 |
+| Package manager | **[vcpkg](https://github.com/microsoft/vcpkg)** with VS integration |
+| SDK | Windows 10/11 SDK (DbgHelp) |
 
-- **Windows 10/11** (x64)
-- **Visual Studio 2022** with "Desktop Development with C++" workload
-- **vcpkg** package manager
+Linux can host the repo and scripts, but **building and running `ObfuGuard.exe` requires Windows** (or a full Windows PE environment). Wine is not supported as a primary target.
 
-### Installing Visual Studio 2022
+### Visual Studio 2022
 
-1. Download Visual Studio 2022 from [visualstudio.microsoft.com](https://visualstudio.microsoft.com/)
-2. In the Visual Studio Installer, select the **"Desktop development with C++"** workload
-3. Ensure the following components are selected:
-   - MSVC v143 build tools
-   - Windows 10/11 SDK
-   - C++ CMake tools (optional, for vcpkg)
+1. Install VS 2022 from [visualstudio.microsoft.com](https://visualstudio.microsoft.com/).  
+2. Workload: **Desktop development with C++**.  
+3. Include MSVC v143 and a recent Windows SDK.
 
-### Installing vcpkg
+### vcpkg
 
 ```powershell
 git clone https://github.com/microsoft/vcpkg.git
@@ -26,9 +27,7 @@ cd vcpkg
 .\vcpkg integrate install
 ```
 
-## Installing Dependencies
-
-Install all required libraries through vcpkg:
+## Dependencies
 
 ```powershell
 vcpkg install capstone:x64-windows
@@ -38,98 +37,103 @@ vcpkg install asmjit:x64-windows
 vcpkg install zydis:x64-windows
 ```
 
-These libraries will also install their transitive dependencies (fmt, spdlog, etc.).
+Transitive packages (e.g. `fmt`, `spdlog`) may appear under `vcpkg list`.
 
-## Building ObfuGuard
+Confirm:
 
-### Step 1: Clone the Repository
+```powershell
+vcpkg list | findstr /i "capstone keystone lief asmjit zydis"
+```
+
+## Clone and build
 
 ```powershell
 git clone https://github.com/sondt99/ObfuGuard.git
 cd ObfuGuard
 ```
 
-### Step 2: Open the Solution
+1. Open **`ObfuGuard.sln`** in Visual Studio 2022.  
+2. Configuration: **Release**  
+3. Platform: **x64**  
+4. Build Solution (`Ctrl+Shift+B`).
 
-Open `ObfuGuard.sln` in Visual Studio 2022.
+Primary output:
 
-### Step 3: Configure Build
+```
+x64\Release\ObfuGuard.exe
+```
 
-1. Set the solution configuration to **Release**
-2. Set the solution platform to **x64**
-3. Ensure vcpkg integration is active (the `.vcxproj` references vcpkg targets automatically)
+Debug builds work for development; use **Release|x64** for evaluation and tests (exception handling and hardening flags are enabled for that config in recent versions).
 
-### Step 4: Build
+## Runtime DLLs
 
-Build the solution (`Ctrl+Shift+B` or Build > Build Solution).
+Keep these next to `ObfuGuard.exe` (vcpkg often copies them via app-local on build):
 
-The output binary will be placed in `x64/Release/ObfuGuard.exe`.
-
-### Step 5: Runtime DLLs
-
-The following DLLs must be in the same directory as `ObfuGuard.exe`:
-
-| DLL | Source |
+| DLL | Origin |
 |-----|--------|
 | `capstone.dll` | vcpkg |
 | `keystone.dll` | vcpkg |
 | `LIEF.dll` | vcpkg |
 | `asmjit.dll` | vcpkg |
 | `Zydis.dll` | vcpkg |
-| `fmt.dll` | vcpkg (transitive) |
-| `spdlog.dll` | vcpkg (transitive) |
+| `fmt.dll` / `spdlog.dll` | transitive |
 
-These are automatically copied to the output directory during build.
+## Inputs for obfuscation
 
-## Build Configurations
+For each target program:
 
-| Configuration | Optimizations | Debug Info | Use Case |
-|--------------|---------------|------------|----------|
-| Debug\|x64 | Disabled | Full PDB | Development and debugging |
-| Release\|x64 | MaxSpeed | Minimal | Production use |
-| Debug\|Win32 | Disabled | Full PDB | 32-bit development |
-| Release\|Win32 | MaxSpeed | Minimal | 32-bit production |
+| File | Required |
+|------|----------|
+| `program.exe` | Yes |
+| `program.pdb` | Yes (same folder preferred; tool also resolves CodeView path or `.pdb` sibling) |
 
-### Release Build Specifics
-
-- Optimization: Maximum Speed (`/O2`)
-- Function-level linking enabled
-- Intrinsic functions enabled
-- COMDAT folding enabled
-- Exception handling: disabled
-- RTTI: disabled
-- Runtime library: Multi-threaded (`/MT`)
-- C++ Standard: C++20
-- C Standard: C17
-
-## Using Pre-built Binaries
-
-Pre-built binaries are available in the `x64/Release/` directory:
-
-| File | Description |
-|------|-------------|
-| `ObfuGuard.exe` | Standard release build |
-| `ObfuGuard.cff.exe` | Self-obfuscated with CFF |
-| `ObfuGuard.junk.exe` | Self-obfuscated with junk code |
-| `ObfuGuard.pdb` | Debug symbols |
-
-## Verifying Installation
-
-Run ObfuGuard to verify it starts correctly:
+Compile with debug info, for example:
 
 ```powershell
+cl /O2 /Zi /Fe:myapp.exe myapp.cpp
+```
+
+## Optional: blacklist file
+
+Ship-time defaults live in:
+
+```
+ObfuGuard\blacklist_default.txt
+```
+
+At runtime ObfuGuard looks for this file under common paths (working directory, `ObfuGuard/`, next to the target PE). If missing, built-in CRT/runtime names are used. Format: one symbol per line; `#` comments; optional `big:Name` for large-binary-only exclusions.
+
+See [junk-code-injection.md](junk-code-injection.md#function-blacklist).
+
+## Verify install
+
+```powershell
+cd x64\Release
 .\ObfuGuard.exe
+# Choose 0 to exit
 ```
 
-Expected output:
-```
-========================================
-         ObfuGuard Tool - sondt
-========================================
+Then run the suite (with a built tool):
 
-Select obfuscation mode:
-  1. Control Flow Flattening
-  2. Insert Junk Code - Trampoline
-  0. Exit
-Enter your choice (0-2):
+```powershell
+cd ..\..\binary_test
+python auto_test.py
+python match_check.py
 ```
+
+Override binary path if needed:
+
+```powershell
+$env:OBFUGUARD_EXE = "D:\path\to\ObfuGuard.exe"
+```
+
+## Common build problems
+
+| Symptom | Fix |
+|---------|-----|
+| Missing headers (Zydis, LIEF, …) | Install all five packages with `:x64-windows`; re-run `vcpkg integrate install` |
+| Unresolved external symbols | Match **x64** platform to vcpkg triplet; rebuild Release|x64 |
+| Missing DLL at run time | Copy vcpkg app-local DLLs next to `ObfuGuard.exe` |
+| PDB not found | Ensure `name.pdb` exists; rebuild target with `/Zi` |
+
+More troubleshooting: [faq.md](faq.md).

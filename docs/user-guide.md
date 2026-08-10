@@ -1,45 +1,12 @@
 # User Guide
 
-## Getting Started
+## Launch
 
-ObfuGuard is a command-line interactive tool. Run it and follow the on-screen prompts.
+From a directory that contains the tool and its DLLs:
 
 ```powershell
 .\ObfuGuard.exe
 ```
-
-## Input Requirements
-
-For obfuscation, you need:
-
-1. **PE executable file** (`.exe`) - The binary you want to obfuscate
-2. **PDB debug symbols file** (`.pdb`) - Must be located in the same directory as the PE file, with the same base name
-
-Example:
-```
-my_program.exe
-my_program.pdb
-```
-
-## Mode 1: Control Flow Flattening
-
-### Supported Architecture
-- **64-bit PE files only**
-
-### Steps
-
-1. Launch ObfuGuard and select option `1`
-2. Enter the path to the PE file (drag-and-drop is supported with quoted paths)
-3. ObfuGuard will:
-   - Validate the PE file and detect architecture
-   - Locate and parse the PDB file automatically
-   - Extract all functions from debug symbols
-   - Create a new `.0Cff` section (10 MB)
-   - Apply CFF to all eligible functions
-   - Obfuscate the entry point
-   - Save the result as `<original_name>.cff.exe`
-
-### Example Session
 
 ```
 ========================================
@@ -50,94 +17,157 @@ Select obfuscation mode:
   1. Control Flow Flattening
   2. Insert Junk Code - Trampoline
   0. Exit
-Enter your choice (0-2): 1
+Enter your choice (0-2):
+```
 
+Paths may be entered with surrounding quotes (Windows drag-and-drop).
+
+## Prerequisites for every run
+
+1. **Input PE** — valid PE file you are allowed to modify  
+2. **PDB** — symbols for that PE (embedded CodeView path or `same-name.pdb` beside the EXE)  
+3. **Architecture**  
+   - Mode 1 (CFF): **64-bit only**  
+   - Mode 2 (junk): **32-bit or 64-bit**
+
+## Mode 1 — Control Flow Flattening
+
+### Steps
+
+1. Select `1`.  
+2. Enter the path to a **64-bit** PE.  
+3. ObfuGuard will:
+   - Detect architecture (rejects non-x64)  
+   - Discover functions via `FunctionDiscovery`  
+   - **Filter** CRT/runtime and tiny functions  
+   - Reserve a **`.0Cff`** section sized from remaining code (capped; not always 10 MB)  
+   - Flatten eligible functions; skip jump-table suspects  
+   - Optionally encode entry-point metadata when the flag is enabled (CLI passes `true`)  
+   - Write **`<stem>.cff.exe`** next to the input  
+
+### Example
+
+```
 === Control Flow Flattening Mode ===
-Enter PE file path for CFF: C:\programs\target.exe
+Enter PE file path for CFF: C:\work\target.exe
 Control Flow Flattening Mode: Detected 64-bit PE
-Successfully analyzed all functions.
-Creating new section .0Cff
-Running Control Flow Flattening Mode
+Successfully analyzed 180 functions.
+Eligible for CFF after filtering: 42 function(s).
+Running Control Flow Flattening Mode (524288 byte section reservation)
 
-Successfully control-flow-flattened 42 selected function(s).
-Output saved to: C:\programs\target.cff.exe
-Control Flow Flattening mode completed in 1.234 seconds.
+Successfully control-flow-flattened 42 function(s).
+Output saved to: C:\work\target.cff.exe
+Control Flow Flattening mode completed in 0.85 seconds.
 ```
 
-### What Gets Skipped
+### What is skipped
 
-- Functions containing jump tables (switch statements with indirect jumps)
-- Functions that are too small to meaningfully flatten
+- Functions on the blacklist (or with leading `_` / `` ` ``)  
+- Functions smaller than the minimum size  
+- Functions flagged as containing jump tables  
 
-## Mode 2: Junk Code Injection with Trampoline
+### Output artifacts
 
-### Supported Architecture
-- **Both 32-bit and 64-bit PE files**
+| Item | Description |
+|------|-------------|
+| `*.cff.exe` | Flattened PE |
+| Section `.0Cff` | Relocated flattened code |
+| `.text` stubs | `jmp` into `.0Cff` (+ pad bytes) |
 
-### Sub-modes
+## Mode 2 — Junk code + trampoline
 
-After selecting mode 2, you choose between:
+### Steps
 
-#### Auto-inject (Option 1)
-Automatically processes all eligible functions. The tool:
-- Discovers all functions via PDB symbols
-- Filters out blacklisted functions (CRT, system functions)
-- Removes functions smaller than 5 bytes
-- Sorts functions by size (largest first) for priority injection
-- Respects PE section limit (max 96 sections with safety margin)
-
-#### Manual (Option 2)
-Allows you to select specific functions to obfuscate:
-- Displays a numbered list of all discovered functions with their RVAs and sizes
-- You select functions by entering their numbers
-- Alternatively, you can enter raw RVA values
-
-### Example Session (Auto-inject)
+1. Select `2`.  
+2. Enter PE path (32- or 64-bit).  
+3. Choose sub-mode:
 
 ```
-=== Junk Code Injection with Trampoline Mode ===
-Enter input PE file path: C:\programs\target.exe
-Junk Code Injection Mode: Detected: 64-bit PE file
-
 Select injection mode:
   1. Auto-inject functions
   2. Manually choose multiple functions
-Enter your choice (1 or 2): 1
-
-[Processing functions...]
-Output saved to: C:\programs\target.junk.exe
-Junk Code Injection mode completed in 0.567 seconds.
+Enter your choice (1 or 2):
 ```
 
-### Function Blacklist
+### Auto (`1`)
 
-The following function categories are automatically excluded from junk code injection to prevent crashes:
+1. Discover all PDB functions.  
+2. Filter by size (min **6** bytes in auto path) and blacklist.  
+3. Sort by size descending.  
+4. Inject until PE **section budget** is exhausted.  
+5. Write **`<stem>.junk.exe`**.
 
-**Always excluded:**
-- CRT initialization: `__scrt_common_main_seh`, `mainCRTStartup`, `__security_init_cookie`, etc.
-- Exception handling: `_CxxThrowException`, `__CxxFrameHandler`, etc.
-- Memory management: `malloc`, `free`, `operator new`, `operator delete`, etc.
-- Security: `__security_check_cookie`, `__GSHandlerCheck`, etc.
+### Manual (`2`)
 
-**Excluded for binaries > 350 KB:**
-- Additional CRT functions that become more complex in larger binaries
-- C++ standard library internal functions
-- Thread-local storage handlers
+1. Print a table: No. | RVA | PDB offset | Size | Name.  
+2. Enter comma-separated numbers (e.g. `1,3,8`) or `0` to cancel.  
+3. Re-filter selection (min size **5**).  
+4. Inject with the same section-aware engine.
 
-## Output Files
+### Output artifacts
 
-| Input | CFF Output | Junk Output |
-|-------|------------|-------------|
-| `program.exe` | `program.cff.exe` | `program.junk.exe` |
+| Item | Description |
+|------|-------------|
+| `*.junk.exe` | Injected PE |
+| New sections | One per injected function (short name derived from symbol) |
+| Original RVA | Trampoline: junk + `E9 rel32` + more junk/NOPs |
 
-Output files are placed in the same directory as the input file.
+Batch layout: all new sections are created, **one** LIEF rebuild assigns VAs, then bodies are re-relocated and trampolines installed.
 
-## Tips and Best Practices
+## Blacklist customization
 
-1. **Always keep backups** - Obfuscation modifies program structure; keep original binaries safe
-2. **Test obfuscated output** - Run the obfuscated binary to verify it behaves identically to the original
-3. **PDB files are required** - Without debug symbols, ObfuGuard cannot discover functions to obfuscate
-4. **CFF is stronger** - For maximum protection, use CFF. Junk code alone adds noise but doesn't restructure logic
-5. **Combine both modes** - You can first apply junk code injection, then apply CFF to the result (if it has a PDB)
-6. **Large binaries** - Junk code injection has additional safety filters for binaries > 350 KB to prevent stability issues
-7. **Section limits** - PE files have a maximum of 96 sections. Each junk code injection adds a section, so the tool automatically limits the number of injectable functions
+Edit or place `blacklist_default.txt`:
+
+```
+# comment
+mainCRTStartup
+memcpy
+big:std::filesystem::exists
+```
+
+- Plain lines → always excluded  
+- `big:Name` → excluded only when the PE is larger than **350 KB**  
+- If the file is not found, built-in defaults apply  
+
+## Verifying results
+
+### Functional
+
+```powershell
+# Prefer your real inputs; suite uses binary_test\input.txt when present
+.\target.exe < input.txt > out_orig.txt
+.\target.cff.exe < input.txt > out_cff.txt
+fc out_orig.txt out_cff.txt
+```
+
+Automated suite: [testing.md](testing.md).
+
+### Static (optional)
+
+Load `*.cff.exe` / `*.junk.exe` in IDA/Ghidra and confirm:
+
+- CFF: dispatcher loops and state compares  
+- Junk: `jmp` at old RVA, body in a new section with extra neutral ops  
+
+## Tips
+
+| Tip | Why |
+|-----|-----|
+| Keep PDB next to EXE | Fastest symbol resolution |
+| Prefer Release builds of targets | Smaller, fewer weird debug edges |
+| Test after each mode | Obfuscation is never risk-free |
+| Large apps + junk | Section limit caps inject count |
+| Do not flatten untested third-party code | Always run regression tests |
+
+## Exit codes
+
+| Code | Meaning |
+|------|---------|
+| `0` | Success (or clean exit from menu `0`) |
+| `1` | Validation error, no eligible functions, inject/CFF failure, invalid menu choice |
+
+## Next
+
+- Algorithms: [control-flow-flattening.md](control-flow-flattening.md), [junk-code-injection.md](junk-code-injection.md)  
+- Internals: [architecture.md](architecture.md)  
+- Problems: [faq.md](faq.md)

@@ -1,243 +1,142 @@
 # Architecture
 
-## Project Structure
+## Repository layout
 
 ```
 ObfuGuard/
-├── ObfuGuard.sln                    # Visual Studio solution
-├── ObfuGuard/                       # Source code
-│   ├── main.cpp                     # Entry point and CLI
-│   ├── pe/                          # PE file parser module
-│   │   ├── pe.h
-│   │   └── pe.cpp
-│   ├── pdbparser/                   # PDB debug symbol parser
-│   │   ├── pdbparser.h
-│   │   └── pdbparser.cpp
-│   ├── obfuscatecff/                # CFF obfuscation engine
-│   │   ├── obfuscatecff.h
-│   │   └── obfuscatecff.cpp
-│   ├── cfflattening/                # CFF algorithm implementation
-│   │   ├── cfflattening.h
-│   │   └── cfflattening.cpp
-│   ├── junkcode/                    # Junk code injection engine
-│   │   ├── junkcode.h
-│   │   └── junkcode.cpp
-│   └── func2rva/                    # Function-to-RVA resolver
-│       ├── func2rva.h
-│       └── func2rva.cpp
-├── benchmark/                       # Benchmark framework
-│   ├── benchmark.py                 # Static analysis benchmark
-│   ├── benchmark_runtime.py         # Runtime benchmark
-│   ├── benchmark_time_pro.py        # RE time benchmark
-│   └── boxplot_*.py                 # Visualization scripts
-├── binary_test/                     # Test binaries (60 programs)
-│   ├── auto_test.py                 # Automated test runner
-│   └── match_check.py              # Output comparison
-├── binary_exeption/                 # Edge-case test binaries
-├── PoC/                             # Proof-of-concept screenshots
-└── x64/Release/                     # Pre-built binaries
+├── ObfuGuard.sln
+├── ObfuGuard/                      # Tool (C++20)
+│   ├── main.cpp                    # CLI, PE arch detect, mode routing
+│   ├── constants.h                 # Named limits and section names
+│   ├── blacklist_default.txt       # Optional blacklist seed file
+│   ├── common/
+│   │   ├── function_info.h         # FunctionInfo { name, pdb_offset, rva, size }
+│   │   ├── function_discovery.*    # pe64 + pdbparser → FunctionInfo list
+│   │   └── function_filter.*       # blacklist, size filter, interactive select
+│   ├── pe/                         # pe64: VA-mapped PE, create_section, save
+│   ├── pdbparser/                  # DbgHelp Sym* API
+│   ├── obfuscatecff/               # CFF engine
+│   ├── cfflattening/               # Flatten algorithm + x86_opcodes
+│   ├── junkcode/                   # TrampolineInjector, JunkCodeManager
+│   └── func2rva/                   # RVAResolver (alias FunctionInfo)
+├── binary_test/                    # ~60 sample programs + scripts
+├── benchmark/                      # Evaluation Python scripts
+├── docs/                           # This documentation
+├── PoC/                            # Screenshots
+├── binary_exeption/                # Edge cases (e.g. no PDB)
+└── x64/Release/                    # Built tool + DLLs (local)
 ```
 
-## Module Dependency Graph
+## Symmetric mode pipeline
 
 ```
-                    main.cpp
-                   /    |    \
-                  /     |     \
-                 v      v      v
-            pe64    pdbparser   func2rva
-              |       |  |        |  |
-              |       |  |        v  v
-              |       v  |      pe64 + pdbparser
-              |      pe64|
-              v          v
-        [Windows SDK]  [DbgHelp]
-
-         obfuscatecff
-          /    |    \
-         v     v     v
-       pe64  Zydis  AsmJit
-         |
-         v
-    cfflattening
-         |
-         v
-    obfuscatecff (uses instruction_t/function_t)
-
-         TrampolineInjector
-          /     |      \
-         v      v       v
-       LIEF  Capstone  Keystone
-
-         JunkCodeManager
-          /          \
-         v            v
-  TrampolineInjector  func2rva
+                    ┌──────────────────────┐
+                    │      main.cpp        │
+                    │  menu + path checks  │
+                    └──────────┬───────────┘
+                               │
+                    ┌──────────▼───────────┐
+                    │ FunctionDiscovery    │
+                    │  pe64 + pdbparser    │
+                    └──────────┬───────────┘
+                               │
+                    ┌──────────▼───────────┐
+                    │ FunctionFilter       │
+                    │  size + blacklist    │
+                    └──────────┬───────────┘
+                 ┌─────────────┴─────────────┐
+                 ▼                           ▼
+        ┌─────────────────┐        ┌─────────────────────┐
+        │  pe64 + CFF     │        │ LIEF + Capstone +   │
+        │  obfuscatecff   │        │ Keystone junk path  │
+        │  cfflattening   │        │ TrampolineInjector  │
+        └────────┬────────┘        └──────────┬──────────┘
+                 │                            │
+                 ▼                            ▼
+           *.cff.exe                     *.junk.exe
 ```
 
-## Module Descriptions
+## Module responsibilities
 
-### main.cpp - Entry Point
+### `main.cpp`
 
-Responsibilities:
-- Display CLI banner and interactive menu
-- Validate PE file input paths
-- Detect PE architecture (32/64-bit) via header inspection
-- Route to CFF or junk code mode
-- Build output file paths
-- Handle errors and report timing
+- Banner and menu (`0` / `1` / `2`)  
+- File existence checks; strip quotes from paths  
+- Lightweight PE magic / machine detection for menu routing  
+- **CFF path:** discovery → filter → `pe64` → `obfuscatecff` → save  
+- **Junk path:** discovery → auto/manual → `JunkCodeManager`  
 
-### pe/pe.h, pe.cpp - PE Parser
+### `common/`
 
-Class: `pe64`
+| Type / API | Role |
+|------------|------|
+| `FunctionInfo` | Canonical symbol record |
+| `FunctionDiscovery` | One PE+PDB load; fills RVAs |
+| `filter_functions` | Eligibility |
+| `load_blacklist_file` / `ensure_blacklist_loaded` | External + built-in lists |
+| `select_functions_interactive` | Manual multi-select UI |
 
-Responsibilities:
-- Load PE binary into memory buffers (relocated and non-relocated copies)
-- Map PE sections to virtual addresses
-- Create new PE sections with specified characteristics
-- Save modified PE to disk with correct section sizes
-- Provide access to NT headers and section headers
+### `pe/` — `pe64`
 
-### pdbparser/pdbparser.h, pdbparser.cpp - PDB Parser
+- Read PE into raw buffer + **VA-mapped** image (`SizeOfImage`)  
+- Validate MZ, PE signature, optional-header magic, AMD64, size bounds  
+- `create_section` with max-section and header-space checks  
+- `save_to_disk` for CFF outputs  
 
-Class: `pdbparser`
+### `pdbparser/`
 
-Responsibilities:
-- Locate PDB file from PE's debug directory or by name convention
-- Load PDB using Windows DbgHelp API (`SymInitialize`, `SymEnumSymbols`)
-- Extract function symbols (name, offset, size)
-- Return structured function list for downstream processing
+- `SymInitialize` / `SymLoadModuleEx` / `SymEnumSymbols`  
+- CodeView directory or `.pdb` sibling fallback  
+- Dedup offsets with `unordered_set`  
+- Cleanup via destructor (`SymCleanup`)  
 
-### obfuscatecff/obfuscatecff.h, obfuscatecff.cpp - CFF Engine
+### `obfuscatecff/` + `cfflattening/`
 
-Class: `obfuscatecff`
+- Zydis disassembly and relative analysis  
+- Block build, shuffle, dispatcher  
+- Relocate, fix short jumps, compile stubs into `.text`  
+- Rebuild `inst_id_index` after flattening  
 
-Responsibilities:
-- Disassemble all functions using Zydis into `instruction_t` structs
-- Track instruction-to-address mappings for reference resolution
-- Analyze functions for relative references and jump tables
-- Coordinate the CFF pipeline (analyze, flatten, relocate, compile)
-- Generate machine code for dispatchers using AsmJit
-- Relocate obfuscated code to new PE sections
-- Fix relative jumps and RIP-relative addressing
-- Obfuscate entry points with XOR/rotation encoding
+### `junkcode/`
 
-### cfflattening/cfflattening.h, cfflattening.cpp - CFF Algorithm
+| Class | Role |
+|-------|------|
+| `TrampolineInjector` | LIEF PE, relocate, trampoline, batch layout |
+| `JunkCodeManager` | Auto/manual orchestration only |
 
-Namespace: `CFF`, `obfuscatecff_extensions`
+Engines Capstone/Keystone are held for the injector lifetime.
 
-Responsibilities:
-- Identify basic blocks from conditional jump instructions
-- Build block connection graph (next_block, dst_block)
-- Shuffle blocks randomly
-- Construct dispatcher with `rax` state variable
-- Generate `cmp/jne` chains for block dispatch
-- Insert `pushf`/`popf` for CPU flag preservation
+### `func2rva/`
 
-### junkcode/junkcode.h, junkcode.cpp - Junk Code Engine
+- `FuncToRVA::FunctionInfo` = **`using` alias** of `ObfuGuard::FunctionInfo`  
+- Interactive helpers still used for some manual RVA workflows  
 
-Classes: `TrampolineInjector`, `JunkCodeManager`
+## Data flow notes
 
-**TrampolineInjector** responsibilities:
-- Load PE via LIEF
-- Disassemble functions with Capstone for relocation
-- Fix CALL/JMP rel32 and RIP-relative displacements
-- Create new PE sections for relocated functions
-- Build trampoline jumps at original locations
-- Generate random junk instructions
-- Assemble junk instructions with Keystone
-- Fill remaining space with multi-byte NOPs
-- Manage PE section count limits
-- Save modified PE via LIEF
+1. **CFF** needs a second `pe64` instance after discovery (discovery’s PE is destroyed with SymCleanup before the engine mutates a fresh map).  
+2. **Junk** uses LIEF for mutation; discovery still uses `pe64` + DbgHelp once.  
+3. Constants live in `constants.h` (`PE_MAX_SECTIONS`, `MAX_JUNK_ITERATIONS`, `CFF_SECTION_SIZE`, …).  
 
-**JunkCodeManager** responsibilities:
-- Orchestrate auto and manual injection modes
-- Apply function blacklist filtering
-- Filter functions by minimum size
-- Sort functions by size for priority injection
-- Apply binary-size-aware additional filtering
+## Build / security-related project settings
 
-### func2rva/func2rva.h, func2rva.cpp - RVA Resolver
+Recent releases enable (where configured in the `.vcxproj`):
 
-Namespace: `FuncToRVA`, Class: `RVAResolver`
+- `/std:c++20`  
+- `/W4`, Control Flow Guard, CET/high-entropy VA on Release|x64  
+- Exception handling enabled on Release|x64 (required for try/catch)  
 
-Responsibilities:
-- Combine PE parsing and PDB parsing
-- Calculate actual RVAs: `text_section_rva + pdb_offset`
-- Provide interactive CLI for function selection (single and multiple)
-- Return structured function info (name, RVA, offset, size)
+Exact flags: see `ObfuGuard/ObfuGuard.vcxproj` and `CHANGELOG.md`.
 
-## Data Flow
+## Extension points
 
-### CFF Mode
+| Goal | Where to start |
+|------|----------------|
+| New junk patterns | `TrampolineInjector::get_random_junk_instruction` |
+| Stricter filters | `function_filter.cpp` / `blacklist_default.txt` |
+| CFF dispatcher shape | `cfflattening.cpp` |
+| Non-interactive CLI | `main.cpp` argument parsing (currently interactive only) |
 
-```
-PE file path
-    │
-    ├──► pe64(path) ──► binary buffer + section map
-    │                         │
-    ├──► pdbparser(pe) ──► vector<sym_func>
-    │                         │
-    ├──► pe.create_section(".0Cff") ──► new section header
-    │                                        │
-    ├──► obfuscatecff(pe)                    │
-    │        │                               │
-    │        ├── create_functions(sym_funcs)  │
-    │        │   └── Zydis disassembly ──► vector<function_t>
-    │        │                                    │
-    │        └── run(new_section, true)            │
-    │             ├── analyze_functions()          │
-    │             ├── remove_jumptables()          │
-    │             ├── apply_control_flow_flattening() per function
-    │             ├── relocate(new_section)        │
-    │             ├── convert_relative_jmps()      │
-    │             ├── apply_relocations()          │
-    │             └── compile(new_section)         │
-    │                                              │
-    └──► pe.save_to_disk(output, new_section, size)
-              │
-              ▼
-         .cff.exe output
-```
+## See also
 
-### Junk Code Mode
-
-```
-PE file path
-    │
-    ├──► DetectPEArchitecture() ──► is_64_bit
-    │
-    ├──► [Auto Mode]
-    │       ├── RVAResolver(path).initialize()
-    │       ├── get_functions_info() ──► vector<FunctionInfo>
-    │       ├── filter: blacklist, size, sort
-    │       └── inject_multiple_function_trampolines_with_limit()
-    │
-    ├──► [Manual Mode]
-    │       ├── select_multiple_functions_rva_interactive()
-    │       └── inject_trampoline_to_multiple_functions()
-    │
-    └──► Per function:
-              ├── create_new_section()
-              ├── get_and_relocate_original_function_code()
-              │       └── Capstone disassembly + address fixup
-              ├── create_trampoline()
-              │       ├── Keystone assemble junk
-              │       ├── JMP rel32 to new section
-              │       └── NOP padding
-              └── save_pe(output_path)
-                    │
-                    ▼
-               .junk.exe output
-```
-
-## External Library Usage
-
-| Library | Where Used | Purpose |
-|---------|-----------|---------|
-| Zydis | `obfuscatecff.cpp` | Decode x86/x64 instructions for CFF analysis |
-| AsmJit | `obfuscatecff.cpp` | JIT-compile dispatcher and new instruction sequences |
-| Capstone | `junkcode.cpp` | Disassemble functions for relocation with address fixup |
-| Keystone | `junkcode.cpp` | Assemble junk instruction strings into machine code |
-| LIEF | `junkcode.cpp` | Parse, modify, and rebuild PE files |
-| DbgHelp | `pdbparser.cpp` | Load and enumerate PDB symbol information |
+- [api-reference.md](api-reference.md)  
+- [overview.md](overview.md)  

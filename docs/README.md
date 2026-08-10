@@ -1,39 +1,45 @@
 # ObfuGuard Documentation
 
-Welcome to the official documentation for **ObfuGuard** - a Windows PE binary obfuscation tool.
+Official documentation for **ObfuGuard** — a Windows PE post-link obfuscation tool (Control Flow Flattening and junk-code trampolines).
 
-## Table of Contents
+**Current line:** v4.1.x · C++20 · MSVC · Release|x64  
+
+## Contents
 
 | Document | Description |
 |----------|-------------|
-| [Overview](overview.md) | Introduction, features, and high-level architecture |
-| [Installation](installation.md) | Prerequisites, build instructions, and environment setup |
-| [User Guide](user-guide.md) | How to use ObfuGuard step by step |
-| [Control Flow Flattening](control-flow-flattening.md) | Technical deep-dive into the CFF obfuscation engine |
-| [Junk Code Injection](junk-code-injection.md) | Technical deep-dive into the junk code/trampoline engine |
-| [Architecture](architecture.md) | Source code structure, modules, and data flow |
-| [API Reference](api-reference.md) | Classes, methods, and data structures |
-| [Benchmarking](benchmarking.md) | Evaluation framework, metrics, and how to run benchmarks |
-| [Testing](testing.md) | Test suite, automated testing, and validation |
-| [FAQ](faq.md) | Frequently asked questions and troubleshooting |
+| [Overview](overview.md) | Purpose, features, supported PE formats |
+| [Installation](installation.md) | VS 2022, vcpkg, build, runtime DLLs |
+| [User Guide](user-guide.md) | Interactive CLI for CFF and junk modes |
+| [Control Flow Flattening](control-flow-flattening.md) | CFF algorithm and PE layout |
+| [Junk Code Injection](junk-code-injection.md) | Trampoline relocation, blacklist, batch inject |
+| [Architecture](architecture.md) | Modules, `common/`, dependency graph |
+| [API Reference](api-reference.md) | Classes and public entry points |
+| [Testing](testing.md) | `binary_test/` suite and scripts |
+| [Benchmarking](benchmarking.md) | Static / runtime / RE-time benchmarks |
+| [FAQ](faq.md) | Common issues and limits |
 
-## Quick Start
+## Quick start
 
-```bash
-# 1. Install dependencies via vcpkg
-vcpkg install capstone:x64-windows
-vcpkg install keystone:x64-windows
-vcpkg install lief:x64-windows
-vcpkg install asmjit:x64-windows
-vcpkg install zydis:x64-windows
+```powershell
+# Dependencies (once)
+vcpkg install capstone:x64-windows keystone:x64-windows lief:x64-windows asmjit:x64-windows zydis:x64-windows
 
-# 2. Open ObfuGuard.sln in Visual Studio 2022
-
-# 3. Build in Release|x64
-
-# 4. Run ObfuGuard.exe and follow the interactive menu
+# Build ObfuGuard.sln → Release | x64
+.\x64\Release\ObfuGuard.exe
 ```
+
+You need a **64-bit PE + PDB** for CFF, and PE + PDB for junk (32- or 64-bit).
+
+## Related repo files
+
+| Path | Role |
+|------|------|
+| [../README.md](../README.md) | Project landing page |
+| [../CHANGELOG.md](../CHANGELOG.md) | Version history |
+| [../SECURITY.md](../SECURITY.md) | Security policy |
+| [../LICENSE](../LICENSE) | MIT |
 
 ## License
 
-MIT License - Copyright (c) 2025 Thai Son Dinh (sondt)
+MIT — Copyright (c) 2025 Thai Son Dinh (sondt).

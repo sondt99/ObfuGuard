@@ -2,71 +2,95 @@
 
 ## What is ObfuGuard?
 
-ObfuGuard is a **post-compilation binary obfuscation tool** for Windows PE (Portable Executable) files. It transforms compiled `.exe` binaries at the machine code level to make reverse engineering significantly more difficult, while preserving the original program's behavior.
+**ObfuGuard** is a **post-compilation** binary obfuscation tool for **Windows PE** files. It rewrites machine code in a finished executable so static analysis and decompilation become harder, while the program’s external behavior should stay the same.
 
-Unlike source-level obfuscators, ObfuGuard operates directly on compiled binaries and their PDB debug symbols. This means it can be applied to any Windows executable regardless of the source language used to compile it.
+It is **not** a source-level obfuscator. Inputs are:
 
-## Key Features
+1. A compiled **`.exe`** (PE)  
+2. A matching **`.pdb`** (for function names, offsets, and sizes)
 
-### Two Obfuscation Modes
+Typical use: research, malware analysis education, and legitimate software protection experiments.
 
-1. **Control Flow Flattening (CFF)** - Restructures the control flow graph of every function by replacing direct block-to-block jumps with a dispatcher-based state machine. This destroys the natural program structure visible to decompilers like IDA Pro.
+## Version context
 
-2. **Junk Code Injection with Trampoline** - Relocates function bodies to new PE sections and fills the original locations with trampoline jumps surrounded by semantically neutral junk instructions. This increases binary complexity and confuses static analysis tools.
+Documentation describes the **v4.x** codebase:
 
-### Additional Capabilities
+- Shared `common/` discovery and filtering for both modes  
+- Named constants, safer PE/PDB handling  
+- Junk injection uses PDB sizes and a **batch** LIEF layout build  
+- CFF only flattens **filtered** (non-CRT, large enough) functions  
 
-- **Automatic PE architecture detection** (32-bit and 64-bit)
-- **PDB symbol parsing** for automatic function discovery
-- **Entry point obfuscation** using XOR and rotation encoding (CFF mode)
-- **Jump table detection and avoidance** to prevent breaking switch statements
-- **Intelligent function blacklisting** to protect CRT and system functions
-- **Self-obfuscation** - ObfuGuard can obfuscate its own binary
-- **Comprehensive benchmark suite** for measuring obfuscation effectiveness
+See [../CHANGELOG.md](../CHANGELOG.md) for exact releases.
 
-## Supported Platforms
+## Obfuscation modes
 
-| Feature | 32-bit PE | 64-bit PE |
-|---------|-----------|-----------|
-| Control Flow Flattening | No | Yes |
-| Junk Code Injection | Yes | Yes |
+### 1. Control Flow Flattening (CFF)
 
-## How It Works (High Level)
+- **64-bit PE only**  
+- Builds basic blocks, shuffles them, routes execution through a **dispatcher** driven by a state in `rax`/`eax`  
+- Preserves CPU flags around blocks with `pushf` / `popf`  
+- Relocates flattened code into a new section **`.0Cff`**  
+- Leaves trampoline-style `jmp` stubs at original function starts  
+- Skips functions that look like they use **jump tables**  
+
+### 2. Junk code injection (trampoline)
+
+- **32-bit and 64-bit PE**  
+- Moves function bodies into **new PE sections**  
+- At the original RVA: optional junk + **`jmp rel32`** to the new body  
+- Relocates relative `call`/`jmp` and RIP-relative operands  
+- **Auto** mode: all eligible functions (size + blacklist), largest first, section-limited  
+- **Manual** mode: interactive multi-select by index  
+
+## Shared pipeline
+
+Both modes share the same discovery path:
 
 ```
-Input PE (.exe) + PDB (.pdb)
-        |
-        v
-  +-----------+
-  | PE Parser |---> Load binary into memory, map sections
-  +-----------+
-        |
-        v
-  +------------+
-  | PDB Parser |---> Extract function names, offsets, sizes
-  +------------+
-        |
-        v
-  +---------------------+
-  | Obfuscation Engine  |---> Apply CFF or Junk Code transformations
-  | (CFF / Junk Code)   |     Create new PE sections for obfuscated code
-  +---------------------+
-        |
-        v
-  Output PE (.cff.exe / .junk.exe)
+PE path
+  → ObfuGuard::FunctionDiscovery   (pe64 + pdbparser)
+  → ObfuGuard::FunctionFilter      (min size, blacklist, optional file)
+  → mode-specific engine
+  → output PE
 ```
+
+| Filter rule | Behavior |
+|-------------|----------|
+| Min size | Below ~5–6 bytes → skip (no room for `jmp rel32`) |
+| Leading `_` | Treated as internal/CRT-style → skip |
+| Names with `` ` `` | MSVC specials / RTTI → skip |
+| Named blacklist | CRT I/O, heap, locale, etc. (see `blacklist_default.txt`) |
+| Large binary set | Extra names when PE size > 350 KB |
+
+## Architecture support
+
+| Feature | PE32 (x86) | PE32+ (x64) |
+|---------|------------|-------------|
+| CFF | No | Yes |
+| Junk + trampoline | Yes | Yes |
+| Manual PE map (`pe64`) | Used for CFF / discovery (x64) | Yes |
+| LIEF PE rewrite | Junk path | Junk path |
 
 ## Dependencies
 
-| Library | Purpose |
+| Library | Used by |
 |---------|---------|
-| [Zydis](https://github.com/zyantific/zydis) | x86/x64 instruction decoder (CFF analysis) |
-| [AsmJit](https://github.com/asmjit/asmjit) | JIT assembler (CFF code generation) |
-| [Capstone](https://github.com/capstone-engine/capstone) | x86 disassembly engine (junk code relocation) |
-| [Keystone](https://github.com/keystone-engine/keystone) | x86 assembler engine (junk instruction assembly) |
-| [LIEF](https://github.com/lief-project/LIEF) | PE file manipulation (junk code injection) |
-| DbgHelp | Windows SDK debug help library (PDB parsing) |
+| [Zydis](https://github.com/zyantific/zydis) | CFF disassembly |
+| [AsmJit](https://github.com/asmjit/asmjit) | CFF-related codegen support |
+| [Capstone](https://github.com/capstone-engine/capstone) | Junk disasm / reloc |
+| [Keystone](https://github.com/keystone-engine/keystone) | Junk assembly |
+| [LIEF](https://github.com/lief-project/LIEF) | Junk PE rewrite |
+| DbgHelp (Windows SDK) | PDB enumeration |
+
+## What ObfuGuard is not
+
+- Not a packer or crypter  
+- Not a virtualization / VM-protect engine  
+- Not a cross-platform ELF/Mach-O tool  
+- Not a guarantee against skilled reverse engineers  
+
+Always validate outputs with your own functional tests (see [testing.md](testing.md)).
 
 ## Author
 
-Thai Son Dinh (sondt) - [GitHub](https://github.com/sondt99)
+Thai Son Dinh (**sondt**) — [github.com/sondt99](https://github.com/sondt99)
