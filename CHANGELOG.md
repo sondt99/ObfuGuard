@@ -3,6 +3,23 @@
 All notable changes to ObfuGuard are documented in this file.
 Format follows [Semantic Versioning](https://semver.org/).
 
+## [4.1.0] - 2026-08-10
+
+### Fixed
+- **Junk relocation truncation**: prefer PDB function size instead of stopping at the first `RET` (early-return functions no longer lose body code)
+- **CFF padding RNG**: replace leftover unseeded `rand()` in `obfuscatecff::compile` with `std::mt19937`
+- **PE validation**: require `IMAGE_NT_SIGNATURE` and 64-bit optional header magic in `pe64` constructor
+- **PE section creation**: enforce `PE_MAX_SECTIONS`, empty-section-table guard, header space checks, SizeOfImage cap
+- **Blacklist file**: load `blacklist_default.txt` at runtime (with built-in fallback); remove duplicate JunkCodeManager blacklist tables
+- **obfuscate_entry_point**: honor the flag when encoding entry point into the CFF section
+- **Test scripts**: resolve paths relative to repo root; support `OBFUGUARD_EXE` env override
+
+### Changed
+- Thread PDB sizes through trampoline inject APIs
+- Use `constants.h` for remaining magic numbers (junk scan/iteration limits, alignments, PDB load base, format buffer)
+- Unify `FuncToRVA::FunctionInfo` as alias of `ObfuGuard::FunctionInfo`
+- Update `docs/testing.md` inventory to match real `binary_test/` programs
+
 ## [4.0.0] - 2026-08-02
 
 ### Added

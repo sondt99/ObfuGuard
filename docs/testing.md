@@ -2,7 +2,9 @@
 
 ## Overview
 
-ObfuGuard has a comprehensive test suite with 60 test programs and automated scripts to verify that obfuscation preserves program behavior.
+ObfuGuard has a comprehensive test suite with ~60 test programs and automated scripts to verify that obfuscation preserves program behavior.
+
+**Platform note:** Full binary tests require Windows (or a working Wine prefix with Windows PE support) and an MSVC-built `ObfuGuard.exe`. On Linux without Wine PE support, use static review and `python -m py_compile` for scripts.
 
 ## Test Suite Structure
 
@@ -22,32 +24,36 @@ binary_test/
 │   ├── factorial.pdb
 │   ├── factorial.cff.exe
 │   └── factorial.junk.exe
-└── ... (60 program directories)
+└── ... (~60 program directories)
 ```
 
 ## Test Programs
 
-The test suite covers a diverse range of program types:
+The suite under `binary_test/` includes (non-exhaustive):
 
 | Category | Programs |
 |----------|----------|
-| Basic I/O | `helloworld`, `fizzbuzz`, `print_hello` |
-| Math | `factorial`, `fibonacci`, `armstrong_number`, `gcd_lcm`, `power_calculator` |
-| Search | `binary_search`, `linear_search` |
-| Sort | `bubble_sort`, `selection_sort`, `insertion_sort` |
-| String | `caesar_cipher`, `palindrome`, `string_reverse`, `string_length`, `vowel_count` |
-| Number theory | `prime_check`, `perfect_number`, `leap_year`, `even_odd` |
-| Array | `array_sum`, `array_reverse`, `array_max_min`, `matrix_addition`, `matrix_multiply` |
-| Patterns | `triangle_pattern`, `diamond_pattern`, `right_triangle_pattern` |
-| Conversion | `celsius_fahrenheit`, `decimal_binary`, `decimal_octal` |
-| Calculators | `simple_calculator`, `quadratic_solver`, `area_calculator` |
-| Misc | `swap_numbers`, `countdown_timer`, `multiplication_table` |
+| Basic I/O | `helloworld`, `fizzbuzz`, `tell_story`, `append_text` |
+| Math | `factorial`, `armstrong_number`, `gcd_cal`, `lcm`, `power_cal`, `x_power_y`, `sum_to_n`, `sum_digit`, `sum_two_nums` |
+| Search / arrays | `linear_search`, `avg_array`, `even_array`, `merge_array`, `reverse_array`, `index_largest_num` |
+| String | `Caesar_cipher`, `check_palindrome`, `check_anagrams`, `reverse_strings`, `count_char`, `count_occurance` |
+| Number theory | `check_perfect`, `check_parity`, `find_divisors`, `bin_to_dec`, `dec_to_bin` |
+| Patterns | `pyramid`, `draw_diamond`, `draw_rec`, `hallow_rec`, `right_triangle`, `horizonal_line` |
+| Conversion / calc | `celsius_to_fahrenheit`, `convert_from_seconds`, `interest_cal`, `perimeter_and_area`, `solve_linear` |
+| Control flow | `condition`, `switch_case`, `loop`, `functions`, `compare`, `const`, `pair` |
+| Misc | `flip_coin`, `roll_dice`, `random_color`, `traffic_light`, `simple_struct`, `pass_value_and_reference`, `mul_table`, `max_in_three`, `larger_num`, `binary_CFF`, `binary_normal` |
 
 ## Automated Test Scripts
 
-### auto_test.py - Obfuscation Runner
+Paths are resolved relative to the repository. Override the tool binary with:
 
-Runs ObfuGuard on all test binaries in both modes.
+```bash
+export OBFUGUARD_EXE=/path/to/ObfuGuard.exe
+```
+
+Default: `x64/Release/ObfuGuard.exe` relative to the repo root.
+
+### auto_test.py - Obfuscation Runner
 
 ```bash
 cd binary_test
@@ -56,14 +62,12 @@ python auto_test.py
 
 **What it does:**
 1. Iterates over all subdirectories in `binary_test/`
-2. For each `.exe` (excluding `.cff.exe` and `.junk.exe`):
+2. For each `.exe` that has a matching `.pdb`:
    - Runs ObfuGuard in CFF mode
-   - Runs ObfuGuard in junk code mode
+   - Runs ObfuGuard in junk code auto mode
 3. Reports success/failure for each obfuscation attempt
 
 ### match_check.py - Behavioral Validation
-
-Verifies that obfuscated binaries produce the same output as originals.
 
 ```bash
 cd binary_test
@@ -71,20 +75,16 @@ python match_check.py
 ```
 
 **What it does:**
-1. For each test program directory:
-   - Runs the original `.exe` with standard input from `input.txt`
-   - Runs the `.cff.exe` variant with the same input
-   - Runs the `.junk.exe` variant with the same input
-   - Compares stdout output of all three
+1. For each test program directory with obfuscated variants:
+   - Runs the original `.exe` with stdin from `input.txt` (if present)
+   - Runs the `.cff.exe` and `.junk.exe` variants with the same input
+   - Compares stdout
 2. Reports PASS/FAIL for each comparison
 
 **Validation criteria:**
-- Exit code matches
-- Stdout output is byte-identical
+- Stdout output is identical (stripped)
 
 ### create_ObfuGuard_obfu.py - Self-obfuscation Test
-
-Tests that ObfuGuard can obfuscate its own binary.
 
 ```bash
 cd binary_test
@@ -92,10 +92,8 @@ python create_ObfuGuard_obfu.py
 ```
 
 **What it does:**
-1. Copies `ObfuGuard.exe` and `ObfuGuard.pdb` to a test directory
-2. Runs ObfuGuard on itself in CFF mode -> `ObfuGuard.cff.exe`
-3. Runs ObfuGuard on itself in junk code mode -> `ObfuGuard.junk.exe`
-4. Verifies that the obfuscated versions can still obfuscate other binaries
+1. Runs ObfuGuard on `ObfuGuard.exe` in CFF and junk modes
+2. Verifies obfuscated binaries still start and exit cleanly (menu choice `0`)
 
 ## Edge Case Testing
 
@@ -114,14 +112,14 @@ The `binary_exeption/` directory contains edge-case binaries:
 1. Place your `.exe` and `.pdb` in a directory
 2. Run ObfuGuard:
    ```powershell
-   .\ObfuGuard.exe
+   .\x64\Release\ObfuGuard.exe
    # Select mode 1 or 2
    # Enter path to your .exe
    ```
 3. Compare output:
    ```powershell
-   .\original.exe < input.txt > original_output.txt
-   .\original.cff.exe < input.txt > cff_output.txt
+   .\original.exe < binary_test\input.txt > original_output.txt
+   .\original.cff.exe < binary_test\input.txt > cff_output.txt
    fc original_output.txt cff_output.txt
    ```
 
@@ -135,7 +133,7 @@ python match_check.py    # Validate behavioral equivalence
 
 ## Test Input
 
-The file `binary_test/input.txt` contains standard input data used across all test programs. Programs that require user input will receive this data via stdin redirection.
+`binary_test/input.txt` contains standard stdin data used across programs that read input.
 
 ## Adding New Test Programs
 
@@ -155,13 +153,12 @@ The file `binary_test/input.txt` contains standard input data used across all te
    python match_check.py
    ```
 
-4. If the program requires specific input, update `input.txt` accordingly.
-
 ## Common Test Failures
 
 | Symptom | Cause | Solution |
 |---------|-------|----------|
-| CFF crashes | Function contains jump tables | Expected behavior; function is skipped |
+| CFF crashes | Function contains jump tables | Expected; function is skipped |
 | Junk output differs | Non-deterministic program (e.g., uses random) | Exclude from match_check |
-| Missing PDB | Debug symbols not generated | Recompile with `/Zi` flag |
+| Missing PDB | Debug symbols not generated | Recompile with `/Zi` |
 | Section limit reached | Too many functions for junk code | Expected; tool reports actual count |
+| `ObfuGuard executable not found` | Scripts cannot locate the binary | Set `OBFUGUARD_EXE` or build Release x64 |

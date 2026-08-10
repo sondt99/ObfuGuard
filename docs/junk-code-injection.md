@@ -60,12 +60,11 @@ LIEF provides full PE parsing and rebuilding capabilities, including section man
 
 ### Step 2: Function Discovery (Auto Mode)
 
-In auto mode, `RVAResolver` combines PE and PDB parsing:
+In auto mode, `ObfuGuard::FunctionDiscovery` loads PE + PDB once:
 
 ```cpp
-FuncToRVA::RVAResolver resolver(input_pe_path);
-resolver.initialize();
-auto& functions = resolver.get_functions_info();
+ObfuGuard::FunctionDiscovery discovery(input_pe_path);
+const auto& functions = discovery.get_functions();
 ```
 
 Each function's RVA is calculated as:
@@ -75,33 +74,26 @@ RVA = text_section_rva + pdb_offset
 
 ### Step 3: Function Filtering
 
-Functions go through multiple filters:
+Filtering is centralized in `ObfuGuard::function_filter` (`common/function_filter.*`).
 
 **Size filter:**
-- Minimum function size: 5 bytes (room for a `jmp rel32`)
+- Minimum function size: 5–6 bytes (room for a `jmp rel32`)
 
-**Name blacklist - always excluded:**
-```
-__scrt_common_main_seh, mainCRTStartup, WinMainCRTStartup,
-__security_init_cookie, _CxxThrowException, __CxxFrameHandler3,
-__CxxFrameHandler4, _RTC_CheckStackVars, __std_exception_copy,
-__std_exception_destroy, _guard_check_icall, _guard_dispatch_icall,
-__report_gsfailure, __GSHandlerCheck, __security_check_cookie
-```
+**Configurable blacklist file:**
 
-**Prefix blacklist - names starting with:**
-```
-_RTC_, __scrt_, _CRT_, __dyn_tls, _onexit, _atexit,
-__telemetry, __vcrt, __acrt
-```
+Ship `ObfuGuard/blacklist_default.txt` (one name per line, `#` comments). At runtime the tool tries:
 
-**Large binary filter (> 350 KB) - additional exclusions:**
-```
-__isa_available_init, _guard_check_icall_nop, _guard_xfg_check_icall_nop,
-__raise_securityfailure, __report_securityfailure, _calloc_base,
-_malloc_base, _free_base, _realloc_base, _msize_base,
-_recalloc_base, __std_type_info_destroy_list
-```
+1. `blacklist_default.txt` in the working directory
+2. `ObfuGuard/blacklist_default.txt`
+3. Next to the target PE path
+
+If no file is found, built-in CRT/runtime defaults are used. Optional `big:Name` lines add large-binary-only exclusions.
+
+**Name heuristics (always applied):**
+- Names containing `` ` `` or `_` mid-string patterns, or starting with `_`
+- Names starting with `??_` (MSVC RTTI / specials)
+
+**Large binary filter (> 350 KB):** additional names from the big-binary set
 
 **Sort order:** Functions are sorted by size in descending order for priority injection.
 
@@ -122,14 +114,15 @@ Section names are generated as unique identifiers based on the function name and
 
 ### Step 5: Code Relocation
 
-The original function code is disassembled with Capstone and relocated:
+The original function code is disassembled with Capstone and relocated. When PDB size is known, the full function span is copied (does **not** stop at the first early `RET`). If size is unknown, the tool falls back to scanning until the first `RET` (capped by `MAX_FUNC_SCAN_SIZE`).
 
 ```cpp
 bool get_and_relocate_original_function_code(
     uint64_t original_func_va,
     uint64_t new_func_base_va,
     std::vector<uint8_t>& relocated_code_buffer,
-    size_t& determined_original_function_size
+    size_t& determined_original_function_size,
+    size_t known_function_size = 0  // PDB size when available
 );
 ```
 

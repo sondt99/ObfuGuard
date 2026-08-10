@@ -4,3 +4,6 @@
 /.vscode
 /ObfuGuard/.vscode
 /ObfuGuard/.vscode
+
+__pycache__/
+*.pyc
