@@ -6,7 +6,7 @@ ObfuGuard transforms compiled **64-bit** Portable Executable files at the machin
 
 | | |
 |---|---|
-| **Version** | 4.1.x |
+| **Version** | 4.2.0 |
 | **License** | MIT |
 | **Platform** | Windows x64 (MSVC v143 / VS 2022) |
 | **Author** | [sondt99](https://github.com/sondt99) |

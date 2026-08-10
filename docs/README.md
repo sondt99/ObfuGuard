@@ -2,7 +2,7 @@
 
 Official documentation for **ObfuGuard** — a Windows PE post-link obfuscation tool (Control Flow Flattening and junk-code trampolines).
 
-**Current line:** v4.1.x · C++20 · MSVC · Release|x64  
+**Current line:** v4.2.0 · C++20 · MSVC · Release|x64  
 
 ## Contents
 
