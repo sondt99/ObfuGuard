@@ -7,6 +7,7 @@
 #include <chrono>
 #include <stdexcept>
 #include <fstream>
+#include <cstdint>
 
 #include <windows.h>
 
@@ -161,7 +162,7 @@ int mode_control_flow_flattening() {
     try {
         // 2. Discover + filter functions (same safety rules as junk mode)
         std::vector<pdbparser::sym_func> sym_functions;
-        uint32_t estimated_section_bytes = ObfuGuard::PE_SECTION_ALIGNMENT;
+        uint64_t estimated_section_bytes = ObfuGuard::PE_SECTION_ALIGNMENT;
         {
             ObfuGuard::FunctionDiscovery discovery(binary_path);
             const auto& functions = discovery.get_functions();
@@ -171,11 +172,9 @@ int mode_control_flow_flattening() {
                 std::cout << "Successfully analyzed " << functions.size() << " functions.\n";
             }
 
-            // Skip CRT/runtime and tiny functions — flattening them breaks the binary
             auto eligible = ObfuGuard::filter_functions(functions, binary_path, ObfuGuard::MIN_FUNCTION_SIZE);
             std::cout << "Eligible for CFF after filtering: " << eligible.size() << " function(s).\n";
 
-            // Convert to sym_func for CFF engine; estimate expanded code size (~4x with dispatcher)
             for (const auto& f : eligible) {
                 pdbparser::sym_func sf;
                 sf.offset = f.pdb_offset;
@@ -184,37 +183,52 @@ int mode_control_flow_flattening() {
                 sf.obfuscate = true;
                 sf.cff_flattening = true;
                 sym_functions.push_back(sf);
-                estimated_section_bytes += f.size * 4u + 256u;
+                // Checked accumulation (avoid uint32 wrap)
+                const uint64_t add = static_cast<uint64_t>(f.size) * 4ull + 256ull;
+                if (estimated_section_bytes > UINT64_MAX - add)
+                    throw std::runtime_error("CFF section size estimate overflow");
+                estimated_section_bytes += add;
             }
-        } // FunctionDiscovery goes out of scope here, releasing SymCleanup
+        }
 
         if (sym_functions.empty()) {
             std::cerr << "Error: No eligible functions remain for Control Flow Flattening.\n";
             return 1;
         }
 
-        // Cap section reservation: enough for expanded code, never exceed historical max
         if (estimated_section_bytes < ObfuGuard::DEFAULT_SECTION_SIZE)
             estimated_section_bytes = ObfuGuard::DEFAULT_SECTION_SIZE;
-        if (estimated_section_bytes > ObfuGuard::CFF_SECTION_SIZE)
-            estimated_section_bytes = ObfuGuard::CFF_SECTION_SIZE;
+        if (estimated_section_bytes > ObfuGuard::CFF_SECTION_SIZE) {
+            std::cerr << "Error: Estimated flattened code (" << estimated_section_bytes
+                << " bytes) exceeds maximum CFF section size (" << ObfuGuard::CFF_SECTION_SIZE
+                << "). Reduce eligible functions or raise the cap.\n";
+            return 1;
+        }
 
-        // 3. CFF engine (needs its own pe64 for VA-mapped buffer)
+        const uint32_t section_reserve = static_cast<uint32_t>(estimated_section_bytes);
+
         pe64 pe(binary_path);
-        auto new_section = pe.create_section(ObfuGuard::CFF_SECTION_NAME, estimated_section_bytes,
+        auto new_section = pe.create_section(ObfuGuard::CFF_SECTION_NAME, section_reserve,
             IMAGE_SCN_MEM_EXECUTE | IMAGE_SCN_MEM_READ | IMAGE_SCN_CNT_CODE);
 
         obfuscatecff obf(&pe);
         obf.create_functions(sym_functions);
-        std::cout << "Running Control Flow Flattening Mode (" << estimated_section_bytes
+        std::cout << "Running Control Flow Flattening Mode (" << section_reserve
             << " byte section reservation)\n";
-        obf.run(new_section, true);
+        // Entry-point stub is not fully wired; do not write EP metadata into the code section
+        obf.run(new_section, false);
 
-        // 4. Save
+        if (obf.get_flattened_function_count() == 0) {
+            std::cerr << "Error: No functions were flattened (all skipped or empty).\n";
+            return 1;
+        }
+
         std::string output = build_output_path(binary_path, ".cff");
-        std::cout << "\nSuccessfully control-flow-flattened " << sym_functions.size() << " function(s).\n";
-        std::cout << "Output saved to: " << output << std::endl;
         pe.save_to_disk(output, new_section, obf.get_added_size());
+        std::cout << "\nSuccessfully control-flow-flattened "
+            << obf.get_flattened_function_count() << " function(s)"
+            << " (of " << sym_functions.size() << " eligible; jumptable funcs skipped).\n";
+        std::cout << "Output saved to: " << output << std::endl;
     }
     catch (const std::runtime_error& e) {
         std::cerr << "Runtime error during CFF obfuscation: " << e.what() << std::endl;
@@ -239,6 +253,13 @@ int mode_trampoline_junkcode() {
     }
 
     std::cout << "Junk Code Injection Mode: Detected: " << (is_64_bit ? "64-bit" : "32-bit") << " PE file\n";
+
+    // Discovery/pe64 currently require PE32+; do not advertise 32-bit support until PE32 loader exists
+    if (!is_64_bit) {
+        std::cerr << "Error: Junk code injection currently requires 64-bit PE files "
+            << "(function discovery uses pe64). 32-bit support is not available in this build.\n";
+        return 1;
+    }
 
     std::string output_pe_path = build_output_path(input_pe_path, ".junk");
 

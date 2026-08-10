@@ -7,6 +7,8 @@
 #include <unordered_set>
 #include <unordered_map>
 #include <random>
+#include <algorithm>
+#include <stdexcept>
 
 #define REG_PAIR(zreg, areg) { ZYDIS_REGISTER_##zreg, asmjit::x86::areg }
 
@@ -41,6 +43,11 @@ void obfuscatecff::create_functions(const std::vector<pdbparser::sym_func>& func
 	if (!text_section)
 		throw std::runtime_error("couldn't find .text section");
 
+	const auto* image_base = this->pe->get_buffer()->data();
+	const size_t image_size = this->pe->get_buffer()->size();
+	const uint64_t text_start = text_section->VirtualAddress;
+	const uint64_t text_end = text_start + std::max(text_section->Misc.VirtualSize, text_section->SizeOfRawData);
+
 	std::unordered_set<uint32_t> visited_rvas;
 
 	for (const auto& function : functions) {
@@ -48,13 +55,25 @@ void obfuscatecff::create_functions(const std::vector<pdbparser::sym_func>& func
 			continue;
 		if (visited_rvas.count(function.offset))
 			continue;
-		if (function.size < 5) // skip if function size is too small
+		if (function.size < ObfuGuard::MIN_FUNCTION_SIZE)
 			continue;
+
+		// Fail closed: PDB offset/size must stay inside the mapped image / .text span
+		const uint64_t func_rva = static_cast<uint64_t>(text_section->VirtualAddress) + function.offset;
+		const uint64_t func_end = func_rva + function.size;
+		if (func_end < func_rva ||
+			func_rva < text_start ||
+			func_end > text_end ||
+			func_end > image_size) {
+			std::cerr << "Warning: skipping function '" << function.name
+				<< "' — offset/size out of .text/image bounds.\n";
+			continue;
+		}
 
 		ZydisDisassembledInstruction zyinstruction{};
 
 		// calculate the address of the function in memory
-		auto address_to_analyze = this->pe->get_buffer()->data() + text_section->VirtualAddress + function.offset;
+		auto address_to_analyze = image_base + text_section->VirtualAddress + function.offset;
 		uint32_t offset = 0;
 
 		int current_func_id = function_iterator++;
@@ -235,16 +254,29 @@ bool obfuscatecff::analyze_functions() {
 
 // relocate code segment in section
 void obfuscatecff::relocate(PIMAGE_SECTION_HEADER new_section) {
-	auto base = pe->get_buffer()->data() + ObfuGuard::PE_SECTION_ALIGNMENT;
-	int used_memory = 0;
-	for (auto func = functions.begin(); func != functions.end(); ++func) { // iterate through each function in the list
+	auto* image = pe->get_buffer()->data();
+	const size_t image_size = pe->get_buffer()->size();
+	// Payload starts after a reserved header region inside the new section
+	const uint32_t payload_rva_base = new_section->VirtualAddress + ObfuGuard::PE_SECTION_ALIGNMENT;
+	uint32_t used_memory = 0;
+
+	for (auto func = functions.begin(); func != functions.end(); ++func) {
 		if (func->has_jumptables)
 			continue;
-		uint32_t dst = new_section->VirtualAddress + used_memory; // calculate destination address of function in new memory
-		int instr_ctr = 0;
+		uint32_t instr_ctr = 0;
 		for (auto instruction = func->instructions.begin(); instruction != func->instructions.end(); ++instruction) {
-			// update relocated_address of instruction
-			instruction->relocated_address = reinterpret_cast<uint64_t>(base) + dst + instr_ctr;
+			const uint64_t abs_rva = static_cast<uint64_t>(payload_rva_base) + used_memory + instr_ctr;
+			if (abs_rva + instruction->zyinstr.info.length > image_size) {
+				throw std::runtime_error(
+					"CFF relocate: instruction would write past end of PE image buffer");
+			}
+			// Payload lives after PE_SECTION_ALIGNMENT reserved bytes inside the section
+			if (ObfuGuard::PE_SECTION_ALIGNMENT + used_memory + instr_ctr +
+				instruction->zyinstr.info.length > new_section->Misc.VirtualSize) {
+				throw std::runtime_error(
+					"CFF relocate: flattened code exceeds reserved .0Cff section size");
+			}
+			instruction->relocated_address = reinterpret_cast<uint64_t>(image) + abs_rva;
 			instr_ctr += instruction->zyinstr.info.length;
 		}
 		used_memory += instr_ctr;
@@ -338,7 +370,9 @@ bool obfuscatecff::fix_relative_jmps(function_t* func, int depth) {
 
 						instruction_iter->reload();
 
-						for (auto instruction_iter2 = instruction_iter; instruction_iter2 != func->instructions.end(); instruction_iter2++) {
+						// Only shift *following* instructions (not the expanded one)
+						for (auto instruction_iter2 = instruction_iter + 1;
+							instruction_iter2 != func->instructions.end(); ++instruction_iter2) {
 							instruction_iter2->relocated_address += 3;
 						}
 
@@ -348,13 +382,18 @@ bool obfuscatecff::fix_relative_jmps(function_t* func, int depth) {
 					else {
 
 						uint16_t new_opcode = rel8_to16(instruction_iter->zyinstr.info.mnemonic);
+						if (new_opcode == 0) {
+							// No known 32-bit encoding for this short conditional — fail closed
+							return false;
+						}
 						instruction_iter->raw_bytes.resize(6);
 						*reinterpret_cast<uint16_t*>(instruction_iter->raw_bytes.data()) = new_opcode;
 						*reinterpret_cast<int32_t*>(&instruction_iter->raw_bytes.data()[2]) = static_cast<int32_t>(inst.relocated_address - instruction_iter->relocated_address - instruction_iter->zyinstr.info.length);
 
 						instruction_iter->reload();
 
-						for (auto instruction2 = instruction_iter; instruction2 != func->instructions.end(); ++instruction2) {
+						for (auto instruction2 = instruction_iter + 1;
+							instruction2 != func->instructions.end(); ++instruction2) {
 							instruction2->relocated_address += 4;
 						}
 
@@ -444,7 +483,8 @@ bool obfuscatecff::apply_relocations(PIMAGE_SECTION_HEADER new_section) {
 							return false;
 						}
 
-						memcpy(reinterpret_cast<void*>(instruction_ptr->relocated_address), instruction_ptr->raw_bytes.data(), instruction_ptr->zyinstr.info.length);
+						if (!write_relocated_bytes(*instruction_ptr))
+							return false;
 					}
 					else {
 
@@ -472,7 +512,8 @@ bool obfuscatecff::apply_relocations(PIMAGE_SECTION_HEADER new_section) {
 							return false;
 						}
 
-						memcpy(reinterpret_cast<void*>(instruction_ptr->relocated_address), instruction_ptr->raw_bytes.data(), instruction_ptr->zyinstr.info.length);
+						if (!write_relocated_bytes(*instruction_ptr))
+							return false;
 					}
 
 				}
@@ -496,12 +537,14 @@ bool obfuscatecff::apply_relocations(PIMAGE_SECTION_HEADER new_section) {
 						return false;
 					}
 
-					memcpy(reinterpret_cast<void*>(instruction_ptr->relocated_address), instruction_ptr->raw_bytes.data(), instruction_ptr->zyinstr.info.length);
+					if (!write_relocated_bytes(*instruction_ptr))
+						return false;
 				}
 
 			}
 			else {
-				memcpy(reinterpret_cast<void*>(instruction_ptr->relocated_address), instruction_ptr->raw_bytes.data(), instruction_ptr->zyinstr.info.length);
+				if (!write_relocated_bytes(*instruction_ptr))
+					return false;
 			}
 
 		}
@@ -510,8 +553,25 @@ bool obfuscatecff::apply_relocations(PIMAGE_SECTION_HEADER new_section) {
 	return true;
 }
 
+// Bounds-checked write of one instruction into the VA-mapped PE image
+bool obfuscatecff::write_relocated_bytes(const instruction_t& instruction) const {
+	const auto* image = pe->get_buffer()->data();
+	const size_t image_size = pe->get_buffer()->size();
+	const auto addr = instruction.relocated_address;
+	const size_t len = instruction.zyinstr.info.length;
+
+	if (addr < reinterpret_cast<uint64_t>(image) ||
+		addr + len > reinterpret_cast<uint64_t>(image) + image_size ||
+		len > instruction.raw_bytes.size()) {
+		return false;
+	}
+	memcpy(reinterpret_cast<void*>(addr), instruction.raw_bytes.data(), len);
+	return true;
+}
+
 // recompile the binary file
 void obfuscatecff::compile(PIMAGE_SECTION_HEADER new_section) {
+	(void)new_section;
 
 	const PIMAGE_SECTION_HEADER current_image_section = IMAGE_FIRST_SECTION(this->pe->get_nt());
 	for (auto i = 0; i < this->pe->get_nt()->FileHeader.NumberOfSections; ++i) {
@@ -519,35 +579,54 @@ void obfuscatecff::compile(PIMAGE_SECTION_HEADER new_section) {
 	}
 
 	auto text_section = this->pe->get_section(".text");
-	auto base = this->pe->get_buffer()->data();
+	if (!text_section)
+		throw std::runtime_error("compile: .text section missing");
+
+	auto* base = this->pe->get_buffer()->data();
+	const size_t image_size = this->pe->get_buffer()->size();
+
+	static std::mt19937 pad_rng{ std::random_device{}() };
+	std::uniform_int_distribution<int> pad_dist(1, 255);
 
 	for (auto func = functions.begin(); func != functions.end(); ++func) {
 
 		if (func->has_jumptables)
+			continue;
+		if (func->instructions.empty())
 			continue;
 
 		auto first_instruction = func->instructions.begin();
 
 		uint8_t jmp_shell[] = { 0xE9, 0x00, 0x00, 0x00, 0x00 };
 
-		if (func->offset != -1) {
+		if (func->offset != static_cast<uint32_t>(-1) && func->size >= 5) {
 			uint32_t src = text_section->VirtualAddress + func->offset;
-			uint32_t dst = first_instruction->relocated_address - reinterpret_cast<uint64_t>(pe->get_buffer()->data());
+			uint32_t dst = static_cast<uint32_t>(
+				first_instruction->relocated_address - reinterpret_cast<uint64_t>(base));
 
+			if (static_cast<size_t>(src) + func->size > image_size)
+				throw std::runtime_error("compile: trampoline pad out of image bounds");
 
-			*reinterpret_cast<int32_t*>(&jmp_shell[1]) = static_cast<signed int>(dst - src - sizeof(jmp_shell));
+			*reinterpret_cast<int32_t*>(&jmp_shell[1]) =
+				static_cast<int32_t>(static_cast<int64_t>(dst) - static_cast<int64_t>(src) - sizeof(jmp_shell));
 
-			static std::mt19937 pad_rng{ std::random_device{}() };
-			std::uniform_int_distribution<int> pad_dist(1, 255);
-			for (int i = 0; i < static_cast<int>(func->size) - 5; i++) {
-				*reinterpret_cast<uint8_t*>(reinterpret_cast<uint64_t>(base) + src + 5 + i) =
-					static_cast<uint8_t>(pad_dist(pad_rng));
+			for (uint32_t i = 5; i < func->size; ++i) {
+				base[src + i] = static_cast<uint8_t>(pad_dist(pad_rng));
 			}
 
-			memcpy(reinterpret_cast<void*>(base + src), jmp_shell, sizeof(jmp_shell));
+			memcpy(base + src, jmp_shell, sizeof(jmp_shell));
 		}
 	}
 
+}
+
+uint32_t obfuscatecff::get_flattened_function_count() const {
+	uint32_t n = 0;
+	for (const auto& f : functions) {
+		if (!f.has_jumptables && !f.instructions.empty())
+			++n;
+	}
+	return n;
 }
 
 void obfuscatecff::run(PIMAGE_SECTION_HEADER new_section, bool obfuscate_entry_point) { // processing flow for code obfuscation on Control Flow Flattening (CFF)

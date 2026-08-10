@@ -28,7 +28,7 @@ Paths may be entered with surrounding quotes (Windows drag-and-drop).
 2. **PDB** — symbols for that PE (embedded CodeView path or `same-name.pdb` beside the EXE)  
 3. **Architecture**  
    - Mode 1 (CFF): **64-bit only**  
-   - Mode 2 (junk): **32-bit or 64-bit**
+   - Mode 2 (junk): **64-bit only** (32-bit is rejected until PE32 discovery exists)
 
 ## Mode 1 — Control Flow Flattening
 
@@ -79,7 +79,7 @@ Control Flow Flattening mode completed in 0.85 seconds.
 ### Steps
 
 1. Select `2`.  
-2. Enter PE path (32- or 64-bit).  
+2. Enter PE path (**64-bit**).  
 3. Choose sub-mode:
 
 ```

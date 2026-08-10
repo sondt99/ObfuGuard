@@ -11,6 +11,13 @@
 #include <fstream>
 #include <mutex>
 
+#ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <Windows.h>
+#endif
+
 namespace ObfuGuard {
 
 // Built-in defaults used when no external blacklist file is available
@@ -133,6 +140,16 @@ void ensure_blacklist_loaded(const std::string& binary_path) {
         candidates.push_back(bp.parent_path() / "ObfuGuard" / "blacklist_default.txt");
     }
 
+#ifdef _WIN32
+    // Also try next to ObfuGuard.exe
+    {
+        char mod[MAX_PATH] = {};
+        if (GetModuleFileNameA(nullptr, mod, MAX_PATH) > 0) {
+            candidates.push_back(std::filesystem::path(mod).parent_path() / "blacklist_default.txt");
+        }
+    }
+#endif
+
     for (const auto& cand : candidates) {
         std::error_code ec;
         if (std::filesystem::exists(cand, ec) && std::filesystem::is_regular_file(cand, ec)) {
@@ -180,10 +197,13 @@ std::vector<FunctionInfo> filter_functions(
     uint32_t min_size)
 {
     ensure_blacklist_loaded(binary_path);
+    const bool large = is_binary_large(binary_path);
     std::vector<FunctionInfo> result;
+    result.reserve(all_functions.size());
     for (const auto& f : all_functions) {
         if (f.size < min_size) continue;
-        if (is_function_blacklisted_by_binary_size(f.name, binary_path)) continue;
+        if (is_function_blacklisted(f.name)) continue;
+        if (large && g_dangerous_names_big_binary.count(f.name) > 0) continue;
         result.push_back(f);
     }
     return result;

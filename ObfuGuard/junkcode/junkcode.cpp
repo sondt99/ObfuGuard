@@ -250,22 +250,15 @@ bool TrampolineInjector::get_and_relocate_original_function_code(
                             if (new_relative_offset_64 >= INT32_MIN && new_relative_offset_64 <= INT32_MAX) {
                                 int32_t new_relative_offset = static_cast<int32_t>(new_relative_offset_64);
                                 memcpy(instr_bytes.data() + 1, &new_relative_offset, sizeof(int32_t));
-
-                                /*std::cout << "Relocated " << (insn[0].bytes[0] == 0xE8 ? "CALL" : "JMP")
-                                    << " at old VA 0x" << std::hex << old_instr_va
-                                    << " to new VA 0x" << new_instr_va
-                                    << ". Target VA: 0x" << old_target_va
-                                    << ", New rel offset: 0x" << new_relative_offset << std::dec << std::endl;*/
                             }
                             else {
-                                std::cerr << "Warning: Cannot relocate " << (insn[0].bytes[0] == 0xE8 ? "CALL" : "JMP")
+                                // Fail closed: do not keep a stale relative after the move
+                                std::cerr << "Error: Cannot relocate " << (insn[0].bytes[0] == 0xE8 ? "CALL" : "JMP")
                                     << " at VA 0x" << std::hex << old_instr_va
-                                    << " - relative offset 0x" << new_relative_offset_64
-                                    << " exceeds INT32 range. Skipping relocation for this instruction."
-                                    << std::dec << std::endl;
-                                // Skip relocation: keep original bytes to avoid crash from wrong offset
-                                std::vector<uint8_t> original_instr_bytes(insn[0].bytes, insn[0].bytes + insn[0].size);
-                                instr_bytes = original_instr_bytes;
+                                    << " — relative offset 0x" << new_relative_offset_64
+                                    << " exceeds INT32 range." << std::dec << std::endl;
+                                cs_free(insn, count);
+                                return false;
                             }
                         }
                         else if (insn[0].bytes[0] == 0xFF) {
@@ -278,14 +271,18 @@ bool TrampolineInjector::get_and_relocate_original_function_code(
                             uint64_t old_instr_va = insn[0].address;
                             uint64_t old_target_data_va = old_instr_va + insn[0].size + original_disp;
                             uint64_t new_instr_va = new_func_base_va + current_copied_offset;
-                            int32_t new_disp = static_cast<int32_t>(old_target_data_va - (new_instr_va + insn[0].size));
+                            int64_t new_disp64 = static_cast<int64_t>(old_target_data_va) -
+                                static_cast<int64_t>(new_instr_va + insn[0].size);
+                            if (new_disp64 < INT32_MIN || new_disp64 > INT32_MAX) {
+                                std::cerr << "Error: RIP-relative CALL/JMP displacement out of range at VA 0x"
+                                    << std::hex << old_instr_va << std::dec << std::endl;
+                                cs_free(insn, count);
+                                return false;
+                            }
+                            int32_t new_disp = static_cast<int32_t>(new_disp64);
 
                             if (insn[0].detail->x86.encoding.disp_offset > 0 && insn[0].detail->x86.encoding.disp_size == sizeof(int32_t)) {
                                 memcpy(instr_bytes.data() + insn[0].detail->x86.encoding.disp_offset, &new_disp, sizeof(int32_t));
-                                /*std::cout << "Relocated RIP-relative " << (insn[0].id == X86_INS_CALL ? "CALL" : "JMP")
-                                    << " at old VA 0x" << std::hex << old_instr_va
-                                    << ". Target data VA: 0x" << old_target_data_va
-                                    << ", New disp: 0x" << new_disp << std::dec << std::endl;*/
                             }
                         }
                     }
@@ -301,16 +298,20 @@ bool TrampolineInjector::get_and_relocate_original_function_code(
                         uint64_t old_instr_va = insn[0].address;
                         uint64_t old_target_data_va = old_instr_va + insn[0].size + original_disp;
                         uint64_t new_instr_va = new_func_base_va + current_copied_offset;
-                        int32_t new_disp = static_cast<int32_t>(old_target_data_va - (new_instr_va + insn[0].size));
+                        int64_t new_disp64 = static_cast<int64_t>(old_target_data_va) -
+                            static_cast<int64_t>(new_instr_va + insn[0].size);
+                        if (new_disp64 < INT32_MIN || new_disp64 > INT32_MAX) {
+                            std::cerr << "Error: RIP-relative operand displacement out of range at VA 0x"
+                                << std::hex << old_instr_va << std::dec << std::endl;
+                            cs_free(insn, count);
+                            return false;
+                        }
+                        int32_t new_disp = static_cast<int32_t>(new_disp64);
 
                         if (insn[0].detail->x86.encoding.disp_offset > 0 && insn[0].detail->x86.encoding.disp_size > 0) {
                             if ((insn[0].detail->x86.encoding.disp_offset + insn[0].detail->x86.encoding.disp_size) <= instr_bytes.size()) {
                                 if (insn[0].detail->x86.encoding.disp_size == sizeof(int32_t)) {
                                     memcpy(instr_bytes.data() + insn[0].detail->x86.encoding.disp_offset, &new_disp, sizeof(int32_t));
-                                    /*std::cout << "Relocated RIP-relative operand in instruction at old VA 0x" << std::hex << old_instr_va
-                                        << " (Opcode: " << insn[0].mnemonic << " " << insn[0].op_str << ")"
-                                        << ". Target data VA: 0x" << old_target_data_va
-                                        << ", New disp: 0x" << new_disp << std::dec << std::endl;*/
                                 }
                             }
                         }
@@ -352,8 +353,22 @@ bool TrampolineInjector::get_and_relocate_original_function_code(
         relocated_code_buffer.push_back(0xC3);
     }
 
-    // Prefer PDB size for original-region trampoline coverage when disasm succeeded fully
-    if (use_pdb_size && current_copied_offset >= known_function_size) {
+    // Refuse partial copies when PDB size was authoritative
+    if (use_pdb_size) {
+        if (known_function_size > ObfuGuard::MAX_FUNC_SCAN_SIZE) {
+            std::cerr << "Error: Function size " << known_function_size
+                << " exceeds MAX_FUNC_SCAN_SIZE (" << ObfuGuard::MAX_FUNC_SCAN_SIZE
+                << "); refusing partial inject." << std::endl;
+            return false;
+        }
+        if (current_copied_offset < known_function_size &&
+            current_copied_offset + 16 < known_function_size) {
+            // Allow tiny trailing pad for undecodable alignment bytes, else fail
+            std::cerr << "Error: Only relocated " << current_copied_offset
+                << " of " << known_function_size
+                << " PDB-reported bytes; refusing partial function body." << std::endl;
+            return false;
+        }
         determined_original_function_size = known_function_size;
     } else {
         determined_original_function_size = current_copied_offset;
@@ -377,22 +392,26 @@ bool TrampolineInjector::create_new_section(const std::string& section_name, uin
 
 // Create ASM instruction sequence that doesn't affect logic (junk) to insert into code
 std::string TrampolineInjector::get_random_junk_instruction() {
+    // Prefer flag-neutral / volatile-only idioms for live trampoline entry
     static const std::vector<std::string> junk_64bit = {
-        // Basic no-op equivalents
         "mov rax, rax",
-        "mov rbx, rbx",
         "mov rcx, rcx",
         "mov rdx, rdx",
+        "mov r8, r8",
+        "mov r9, r9",
+        "mov r10, r10",
+        "mov r11, r11",
+        "lea rax, [rax]",
+        "lea rcx, [rcx]",
+        "lea rdx, [rdx]",
+        "nop",
+        "xchg rax, rax",
 
-        // Self-canceling operation pairs
+        // Self-canceling pairs on volatile regs only (r8–r11)
         "add r8, 0x10; sub r8, 0x10",
         "add r9, 0x20; sub r9, 0x20",
         "add r10, 0x30; sub r10, 0x30",
         "add r11, 0x40; sub r11, 0x40",
-        "add r12, 0x50; sub r12, 0x50",
-        "add r13, 0x60; sub r13, 0x60",
-        "add r14, 0x70; sub r14, 0x70",
-        "add r15, 0x80; sub r15, 0x80",
 
         // Reversed
         "sub r8, 0x15; add r8, 0x15",
@@ -667,18 +686,9 @@ bool TrampolineInjector::create_trampoline(uint64_t original_func_va, uint64_t n
         return false;
     }
 
-    // Calculate position and size of junk code before inserting JMP
-    size_t min_junk_before = std::min((size_t)3, original_size / 3);
-    size_t max_junk_before = (original_size > 5 + 1) ? (original_size - 5 - 1) : min_junk_before; // 5 bytes for JMP
-
-    if (max_junk_before < min_junk_before) {
-        max_junk_before = min_junk_before;
-    }
-
-    size_t junk_before_size = min_junk_before;
-    if (max_junk_before > min_junk_before) {
-        junk_before_size = min_junk_before + std::uniform_int_distribution<size_t>(0, max_junk_before - min_junk_before)(rng_);
-    }
+    // JMP first (no live junk before trampoline) — flag-safe function entry
+    // Remaining bytes after the 5-byte JMP are filled with dead junk / NOPs
+    const size_t junk_before_size = 0;
 
     // JMP instruction will be placed at this VA
     uint64_t jmp_va = original_func_va + junk_before_size;
@@ -949,6 +959,10 @@ bool TrampolineInjector::inject_multiple_function_trampolines_with_limit(
 
     // Limit number of functions to inject
     uint32_t functions_to_inject = std::min(planned_injections, max_injectable);
+    if (functions_to_inject < planned_injections) {
+        std::cout << "Note: Auto-limiting inject count from " << planned_injections
+            << " to " << functions_to_inject << " due to PE section budget.\n";
+    }
 
     /*std::cout << "Proceeding with injection of " << functions_to_inject << " function(s) out of "
         << planned_injections << " requested." << std::endl;*/
@@ -1004,7 +1018,8 @@ int JunkCodeManager::run_auto_injection_mode(const std::string& input_pe_path,
 
     try {
         // Filter functions: remove blacklisted and those with size < 6 (i.e. size > 5)
-        std::vector<ObfuGuard::FunctionInfo> filtered = ObfuGuard::filter_functions(discovered_functions, input_pe_path, 6);
+        std::vector<ObfuGuard::FunctionInfo> filtered = ObfuGuard::filter_functions(
+            discovered_functions, input_pe_path, ObfuGuard::MIN_FUNCTION_SIZE);
 
         // Sort by size descending
         ObfuGuard::sort_functions_by_size_desc(filtered);
@@ -1024,7 +1039,8 @@ int JunkCodeManager::run_auto_injection_mode(const std::string& input_pe_path,
         }
 
         if (function_rvas.empty()) {
-            std::cerr << "No functions > 5 bytes found after filtering.\n";
+            std::cerr << "No functions with size >= " << ObfuGuard::MIN_FUNCTION_SIZE
+                << " bytes found after filtering.\n";
             return 1;
         }
 
@@ -1059,35 +1075,30 @@ int JunkCodeManager::run_manual_injection_mode(const std::string& input_pe_path,
     std::cout << "Running manual injection mode..." << std::endl;
 
     try {
-        std::vector<uint32_t> function_rvas;
-        std::vector<std::string> function_names;
-
-        // Interactive selection from pre-discovered functions
-        if (!ObfuGuard::select_functions_interactive(discovered_functions, function_rvas, function_names)) {
+        // Filter first so the interactive list only shows injectable functions
+        std::vector<ObfuGuard::FunctionInfo> eligible = ObfuGuard::filter_functions(
+            discovered_functions, input_pe_path, ObfuGuard::MIN_FUNCTION_SIZE);
+        if (eligible.empty()) {
+            std::cerr << "Error: No eligible functions remain after filtering.\n";
             return 1;
         }
 
-        // Filter selected functions by size and blacklist using the discovered list
-        // Build a subset of discovered_functions matching the selected RVAs
-        std::vector<ObfuGuard::FunctionInfo> selected_functions;
-        for (size_t i = 0; i < function_rvas.size(); ++i) {
-            uint32_t rva = function_rvas[i];
-            auto it = std::find_if(discovered_functions.begin(), discovered_functions.end(),
-                [rva](const ObfuGuard::FunctionInfo& f) { return f.rva == rva; });
-            if (it != discovered_functions.end()) {
-                selected_functions.push_back(*it);
-            } else {
-                // Manually entered RVA not in discovered list -- keep it with size 0
-                ObfuGuard::FunctionInfo manual_func;
-                manual_func.name = function_names[i];
-                manual_func.rva = rva;
-                manual_func.pdb_offset = 0;
-                manual_func.size = 0;
-                selected_functions.push_back(manual_func);
-            }
+        std::vector<uint32_t> function_rvas;
+        std::vector<std::string> function_names;
+
+        if (!ObfuGuard::select_functions_interactive(eligible, function_rvas, function_names)) {
+            return 1;
         }
 
-        std::vector<ObfuGuard::FunctionInfo> filtered = ObfuGuard::filter_functions(selected_functions, input_pe_path, 5);
+        std::vector<ObfuGuard::FunctionInfo> filtered;
+        for (size_t i = 0; i < function_rvas.size(); ++i) {
+            uint32_t rva = function_rvas[i];
+            auto it = std::find_if(eligible.begin(), eligible.end(),
+                [rva](const ObfuGuard::FunctionInfo& f) { return f.rva == rva; });
+            if (it != eligible.end()) {
+                filtered.push_back(*it);
+            }
+        }
 
         // Extract RVAs, names, and PDB sizes from filtered list
         function_rvas.clear();

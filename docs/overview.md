@@ -35,7 +35,8 @@ See [../CHANGELOG.md](../CHANGELOG.md) for exact releases.
 
 ### 2. Junk code injection (trampoline)
 
-- **32-bit and 64-bit PE**  
+- **64-bit PE only** (current release)  
+
 - Moves function bodies into **new PE sections**  
 - At the original RVA: optional junk + **`jmp rel32`** to the new body  
 - Relocates relative `call`/`jmp` and RIP-relative operands  
@@ -67,9 +68,9 @@ PE path
 | Feature | PE32 (x86) | PE32+ (x64) |
 |---------|------------|-------------|
 | CFF | No | Yes |
-| Junk + trampoline | Yes | Yes |
-| Manual PE map (`pe64`) | Used for CFF / discovery (x64) | Yes |
-| LIEF PE rewrite | Junk path | Junk path |
+| Junk + trampoline | No (blocked; needs PE32 discovery) | Yes |
+| Manual PE map (`pe64`) | No | Yes |
+| LIEF PE rewrite | No | Junk path |
 
 ## Dependencies
 

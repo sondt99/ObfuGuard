@@ -1,4 +1,5 @@
-﻿#include "cfflattening.h"
+#include "cfflattening.h"
+#include <algorithm>
 #include <cstdint>
 #include <random>
 #include <vector>
@@ -6,8 +7,9 @@
 namespace x86_opcodes {
     const std::vector<uint8_t> PUSH_RAX = { 0x50 };
     const std::vector<uint8_t> POP_RAX = { 0x58 };
-    const std::vector<uint8_t> PUSHF = { 0x66, 0x9C };
-    const std::vector<uint8_t> POPF = { 0x66, 0x9D };
+    // Full RFLAGS push/pop for long mode (not 16-bit operand-size forms)
+    const std::vector<uint8_t> PUSHF = { 0x9C };
+    const std::vector<uint8_t> POPF = { 0x9D };
     const std::vector<uint8_t> MOV_EAX_IMM32 = { 0xB8, 0x00, 0x00, 0x00, 0x00 };
     const std::vector<uint8_t> CMP_EAX_IMM32 = { 0x3D, 0x00, 0x00, 0x00, 0x00 };
     const std::vector<uint8_t> JNE_REL8 = { 0x75, 0x08 };
@@ -19,8 +21,15 @@ bool is_jmp_conditional(const ZydisDecodedInstruction& instr) {
 	return instr.meta.category == ZYDIS_CATEGORY_COND_BR;
 }
 
+static bool is_unconditional_jmp(const ZydisDecodedInstruction& instr) {
+	return instr.mnemonic == ZYDIS_MNEMONIC_JMP;
+}
+
 // apply control flow flattening algorithm
 bool obfuscatecff::apply_control_flow_flattening(std::vector<obfuscatecff::function_t>::iterator& func) {
+
+	if (func->instructions.empty())
+		return false;
 
 	struct basic_block {
 		int block_id;
@@ -29,33 +38,30 @@ bool obfuscatecff::apply_control_flow_flattening(std::vector<obfuscatecff::funct
 		int dst_block;
 
 		basic_block()
-			: block_id(-1)      // initialize block_id -1
-			, next_block(-1)    // initialize next_block -1
-			, dst_block(-1)     // initialize dst_block -1
+			: block_id(-1)
+			, next_block(-1)
+			, dst_block(-1)
 		{
 		}
 	};
 
-	std::vector<basic_block>blocks;
-	std::vector<int>block_starts;
+	std::vector<basic_block> blocks;
+	std::vector<int> block_starts;
 	basic_block block;
 	int block_iterator = 0;
 
-	// Collect basic block start points within the function
+	// Collect basic block start points: any intra-function branch target
 	for (const auto& inst : func->instructions)
 	{
-		// Only consider jumps with targets still within the same function
 		if (inst.relative.target_func_id != func->func_id)
 			continue;
+		if (!inst.isjmpcall)
+			continue;
+		if (inst.zyinstr.info.mnemonic == ZYDIS_MNEMONIC_CALL)
+			continue;
 
-		const auto& meta = inst.zyinstr.info;
-
-		const bool condJump = is_jmp_conditional(meta);
-		const bool shortJmp = (meta.mnemonic == ZYDIS_MNEMONIC_JMP) &&
-			meta.raw.imm &&              // ensure immediate exists
-			meta.raw.imm->size == 8;     // 8-bit short JMP
-
-		if (condJump || shortJmp)
+		// Conditional or unconditional JMP with a resolved target
+		if (inst.relative.target_inst_id != -1)
 			block_starts.emplace_back(inst.relative.target_inst_id);
 	}
 
@@ -81,7 +87,8 @@ bool obfuscatecff::apply_control_flow_flattening(std::vector<obfuscatecff::funct
 			continue;
 		}
 
-		if (instruction->zyinstr.info.mnemonic == ZYDIS_MNEMONIC_RET || (instruction->isjmpcall && instruction->zyinstr.info.mnemonic != ZYDIS_MNEMONIC_CALL))
+		if (instruction->zyinstr.info.mnemonic == ZYDIS_MNEMONIC_RET ||
+			(instruction->isjmpcall && instruction->zyinstr.info.mnemonic != ZYDIS_MNEMONIC_CALL))
 		{
 			block.block_id = block_iterator++;
 			blocks.push_back(block);
@@ -89,25 +96,45 @@ bool obfuscatecff::apply_control_flow_flattening(std::vector<obfuscatecff::funct
 		}
 	}
 
+	if (blocks.empty())
+		return false;
+
 	// Build connections between blocks
-	for (auto& block : blocks) {
-		// By default, the next block is the block with ID + 1
-		block.next_block = block.block_id + 1;
+	const int max_block_id = block_iterator - 1;
+	for (auto& blk : blocks) {
+		// Default fall-through to next sequential block id (if any)
+		blk.next_block = (blk.block_id < max_block_id) ? (blk.block_id + 1) : -1;
 
-		auto& last_inst = block.instructions.back();
+		if (blk.instructions.empty())
+			continue;
 
-		// Handle conditional jump instructions
-		if (last_inst.isjmpcall && is_jmp_conditional(last_inst.zyinstr.info)) {
+		auto& last_inst = blk.instructions.back();
 
-			// Find the target block of the jump instruction
+		// Conditional or unconditional JMP with resolved target → dst_block
+		if (last_inst.isjmpcall &&
+			last_inst.zyinstr.info.mnemonic != ZYDIS_MNEMONIC_CALL &&
+			last_inst.relative.target_inst_id != -1) {
+
 			auto target_block = std::find_if(blocks.begin(), blocks.end(),
-				[&](const auto& blk) {
-					return blk.instructions.front().inst_id == last_inst.relative.target_inst_id;
+				[&](const auto& b) {
+					return !b.instructions.empty() &&
+						b.instructions.front().inst_id == last_inst.relative.target_inst_id;
 				});
 
 			if (target_block != blocks.end()) {
-				block.dst_block = target_block->block_id;
+				blk.dst_block = target_block->block_id;
 			}
+
+			// Unconditional JMP has no fall-through
+			if (is_unconditional_jmp(last_inst.zyinstr.info)) {
+				blk.next_block = -1;
+			}
+		}
+
+		// RET has no fall-through / dispatcher successor
+		if (last_inst.zyinstr.info.mnemonic == ZYDIS_MNEMONIC_RET) {
+			blk.next_block = -1;
+			blk.dst_block = -1;
 		}
 	}
 
@@ -116,11 +143,11 @@ bool obfuscatecff::apply_control_flow_flattening(std::vector<obfuscatecff::funct
 	func->instructions.begin()->inst_id = new_id;
 	func->instructions.begin()->is_first_instruction = false;
 
-	// shuffle the position of blocks in the vector randomly
-	auto rng = std::default_random_engine{std::random_device{}()};
+	// Shuffle only the dispatcher compare order — not which blocks get transitions
+	auto rng = std::default_random_engine{ std::random_device{}() };
 	std::shuffle(blocks.begin(), blocks.end(), rng);
 
-	// perform flow restructuring with dispatcher through comparison with rax state variable
+	// Dispatcher prologue
 	instruction_t push_rax{}; push_rax.load(func->func_id, x86_opcodes::PUSH_RAX);
 	push_rax.inst_id = first_inst_id;
 	push_rax.is_first_instruction = true;
@@ -133,7 +160,7 @@ bool obfuscatecff::apply_control_flow_flattening(std::vector<obfuscatecff::funct
 	for (auto current_block = blocks.begin(); current_block != blocks.end(); current_block++) {
 
 		instruction_t cmp_eax{}; cmp_eax.load(func->func_id, x86_opcodes::CMP_EAX_IMM32);
-		*(uint32_t*)&cmp_eax.raw_bytes.data()[1] = current_block->block_id;
+		*reinterpret_cast<uint32_t*>(&cmp_eax.raw_bytes.data()[1]) = static_cast<uint32_t>(current_block->block_id);
 
 		instruction_t jne{}; jne.load(func->func_id, x86_opcodes::JNE_REL8);
 
@@ -142,110 +169,152 @@ bool obfuscatecff::apply_control_flow_flattening(std::vector<obfuscatecff::funct
 		instruction_t pop_rax{}; pop_rax.load(func->func_id, x86_opcodes::POP_RAX);
 
 		instruction_t jmp{}; jmp.load(func->func_id, x86_opcodes::JMP_REL32);
-		jmp.relative.target_inst_id = current_block->block_id == 0 ? new_id : current_block->instructions.begin()->inst_id;
+		jmp.relative.target_inst_id = current_block->block_id == 0
+			? new_id
+			: current_block->instructions.begin()->inst_id;
 		jmp.relative.target_func_id = func->func_id;
 
 		it = func->instructions.insert(it + 1, { cmp_eax , jne, pop_f, pop_rax, jmp });
 		it = it + 4;
 	}
 
-	// Reconfigure conditional JNZ jump instructions in the dispatcher
 	auto configure_dispatcher_jumps = [&](auto dispatcher_end_iterator) {
-		constexpr int DISPATCHER_BLOCK_SIZE = 4; // Size of each comparison block in dispatcher
+		constexpr int DISPATCHER_BLOCK_SIZE = 4;
 
 		for (auto inst_iter = func->instructions.begin(); inst_iter <= dispatcher_end_iterator; ++inst_iter) {
-
-			// Check if this is a JNZ (Jump if Not Zero) instruction
 			if (inst_iter->zyinstr.info.mnemonic == ZYDIS_MNEMONIC_JNZ) {
-
-				// Calculate jump target position (skip current dispatcher block)
 				auto jump_target_iter = inst_iter + DISPATCHER_BLOCK_SIZE;
-
-				// Ensure we don't exceed valid range
 				if (jump_target_iter <= dispatcher_end_iterator) {
 					inst_iter->relative.target_func_id = func->func_id;
 					inst_iter->relative.target_inst_id = jump_target_iter->inst_id;
 				}
 			}
 		}
-		};
+	};
 
-	// Call configuration function with dispatcher end iterator
 	configure_dispatcher_jumps(it);
 
-	// Helper function to create instruction sequence to return to dispatcher
 	auto create_dispatcher_transition = [&](int target_block_id) -> std::vector<instruction_t> {
 		std::vector<instruction_t> transition_sequence;
 
-		// Save register state
 		instruction_t preserve_rax{};
-		preserve_rax.load(func->func_id, x86_opcodes::PUSH_RAX); // push rax to stack
+		preserve_rax.load(func->func_id, x86_opcodes::PUSH_RAX);
 
 		instruction_t preserve_flags{};
-		preserve_flags.load(func->func_id, x86_opcodes::PUSHF); // push flags to stack
+		preserve_flags.load(func->func_id, x86_opcodes::PUSHF);
 
-		// Load target block ID into EAX register
 		instruction_t load_state{};
-		load_state.load(func->func_id, x86_opcodes::MOV_EAX_IMM32); // mov eax, imm32
-		*(uint32_t*)(&load_state.raw_bytes.data()[1]) = target_block_id;
+		load_state.load(func->func_id, x86_opcodes::MOV_EAX_IMM32);
+		*reinterpret_cast<uint32_t*>(&load_state.raw_bytes.data()[1]) = static_cast<uint32_t>(target_block_id);
 
-		// Jump back to dispatcher
 		instruction_t return_to_dispatcher{};
-		return_to_dispatcher.load(func->func_id, x86_opcodes::JMP_REL32); // jmp rel32
+		return_to_dispatcher.load(func->func_id, x86_opcodes::JMP_REL32);
 		return_to_dispatcher.relative.target_func_id = func->func_id;
 		return_to_dispatcher.relative.target_inst_id = (func->instructions.begin() + 3)->inst_id;
 
 		transition_sequence = { preserve_rax, preserve_flags, load_state, return_to_dispatcher };
 		return transition_sequence;
-		};
+	};
 
-	// Reconfigure blocks to return to dispatcher after execution
-	for (auto block_iter = blocks.begin(); block_iter != blocks.end() - 1; block_iter++) {
+	// Reconfigure EVERY block that needs a dispatcher successor (not "all but last shuffled")
+	for (auto block_iter = blocks.begin(); block_iter != blocks.end(); ++block_iter) {
 
-		// Find the last instruction of the current block
+		if (block_iter->instructions.empty())
+			continue;
+
+		// RET terminal: leave as-is
+		const auto& last_orig = block_iter->instructions.back();
+		if (last_orig.zyinstr.info.mnemonic == ZYDIS_MNEMONIC_RET)
+			continue;
+
+		// No successors → nothing to rewrite
+		if (block_iter->next_block < 0 && block_iter->dst_block < 0)
+			continue;
+
 		auto last_inst = std::find_if(func->instructions.begin(), func->instructions.end(),
 			[&](const obfuscatecff::instruction_t& inst) {
-				return inst.inst_id == (block_iter->instructions.end() - 1)->inst_id;
+				return inst.inst_id == last_orig.inst_id;
 			});
 
-		if (last_inst == func->instructions.end()) continue;
+		if (last_inst == func->instructions.end())
+			continue;
 
-		// Find the next block in the execution chain
-		auto next_block_iter = std::find_if(blocks.begin(), blocks.end(),
-			[&](const basic_block& blk) { return blk.block_id == block_iter->next_block; });
-
-		if (next_block_iter == blocks.end()) continue;
-
-		// Handle conditional jump instructions with 2 targets
+		// Conditional: two targets (fall-through + taken)
 		if (is_jmp_conditional(last_inst->zyinstr.info) && block_iter->dst_block != -1) {
 
+			auto next_block_iter = std::find_if(blocks.begin(), blocks.end(),
+				[&](const basic_block& blk) { return blk.block_id == block_iter->next_block; });
 			auto dst_block_iter = std::find_if(blocks.begin(), blocks.end(),
 				[&](const basic_block& blk) { return blk.block_id == block_iter->dst_block; });
 
-			if (dst_block_iter == blocks.end()) continue;
+			if (dst_block_iter == blocks.end())
+				continue;
 
-			// Create transition for fall-through path (no jump)
-			auto fallthrough_transition = create_dispatcher_transition(next_block_iter->block_id);
-			last_inst = func->instructions.insert(last_inst + 1,
-				fallthrough_transition.begin(), fallthrough_transition.end());
-			last_inst += fallthrough_transition.size() - 1;
+			// Fall-through path (if next_block exists)
+			if (next_block_iter != blocks.end() && block_iter->next_block >= 0) {
+				auto fallthrough_transition = create_dispatcher_transition(next_block_iter->block_id);
+				last_inst = func->instructions.insert(last_inst + 1,
+					fallthrough_transition.begin(), fallthrough_transition.end());
+				last_inst += fallthrough_transition.size() - 1;
 
-			// Create transition for branch target path (with jump)
-			auto branch_transition = create_dispatcher_transition(dst_block_iter->block_id);
-			last_inst = func->instructions.insert(last_inst + 1,
-				branch_transition.begin(), branch_transition.end());
-			last_inst += branch_transition.size() - 1;
+				auto branch_transition = create_dispatcher_transition(dst_block_iter->block_id);
+				last_inst = func->instructions.insert(last_inst + 1,
+					branch_transition.begin(), branch_transition.end());
+				last_inst += branch_transition.size() - 1;
 
-			// Adjust conditional jump instruction to jump to branch transition
-			auto conditional_inst = last_inst - (fallthrough_transition.size() + branch_transition.size());
-			conditional_inst->relative.target_inst_id = (last_inst - branch_transition.size() + 1)->inst_id;
+				auto conditional_inst = last_inst - (fallthrough_transition.size() + branch_transition.size());
+				conditional_inst->relative.target_inst_id =
+					(last_inst - branch_transition.size() + 1)->inst_id;
+			}
+			else {
+				// No fall-through: only branch transition; rewrite jcc to always go via dispatcher
+				auto branch_transition = create_dispatcher_transition(dst_block_iter->block_id);
+				last_inst = func->instructions.insert(last_inst + 1,
+					branch_transition.begin(), branch_transition.end());
+				last_inst += branch_transition.size() - 1;
+				auto conditional_inst = last_inst - branch_transition.size();
+				conditional_inst->relative.target_inst_id =
+					(last_inst - branch_transition.size() + 1)->inst_id;
+			}
 		}
-		else {
-			// Handle non-conditional flow - only need 1 transition
-			auto transition_sequence = create_dispatcher_transition(next_block_iter->block_id);
-			auto insertion_point = func->instructions.insert(last_inst + 1,
+		// Unconditional JMP: single target via dispatcher
+		else if (is_unconditional_jmp(last_inst->zyinstr.info) && block_iter->dst_block != -1) {
+			auto dst_block_iter = std::find_if(blocks.begin(), blocks.end(),
+				[&](const basic_block& blk) { return blk.block_id == block_iter->dst_block; });
+			if (dst_block_iter == blocks.end())
+				continue;
+
+			auto transition_sequence = create_dispatcher_transition(dst_block_iter->block_id);
+			// Replace JMP with transition: insert after, then we leave original JMP pointing to transition start
+			last_inst = func->instructions.insert(last_inst + 1,
 				transition_sequence.begin(), transition_sequence.end());
-			insertion_point += transition_sequence.size() - 1;
+			// Point original JMP at first transition insn
+			auto jmp_inst = last_inst - 1;
+			// last_inst now points to first inserted; original is just before
+			// After insert(last_inst+1), last_inst was old last; insert returns iterator to first new
+			// Re-find original jmp
+			auto orig_jmp = std::find_if(func->instructions.begin(), func->instructions.end(),
+				[&](const obfuscatecff::instruction_t& inst) {
+					return inst.inst_id == last_orig.inst_id;
+				});
+			if (orig_jmp != func->instructions.end()) {
+				auto first_trans = orig_jmp + 1;
+				if (first_trans != func->instructions.end()) {
+					orig_jmp->relative.target_inst_id = first_trans->inst_id;
+					orig_jmp->relative.target_func_id = func->func_id;
+				}
+			}
+		}
+		// Fall-through only
+		else if (block_iter->next_block >= 0) {
+			auto next_block_iter = std::find_if(blocks.begin(), blocks.end(),
+				[&](const basic_block& blk) { return blk.block_id == block_iter->next_block; });
+			if (next_block_iter == blocks.end())
+				continue;
+
+			auto transition_sequence = create_dispatcher_transition(next_block_iter->block_id);
+			func->instructions.insert(last_inst + 1,
+				transition_sequence.begin(), transition_sequence.end());
 		}
 	}
 	return true;

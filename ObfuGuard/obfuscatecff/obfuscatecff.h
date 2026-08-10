@@ -51,6 +51,8 @@ private:
 
     bool apply_relocations(PIMAGE_SECTION_HEADER new_section);
 
+    bool write_relocated_bytes(const instruction_t& instruction) const;
+
     void compile(PIMAGE_SECTION_HEADER new_section);
 
     // Reverse translate generated machine code to instruction_t for further processing
@@ -72,6 +74,9 @@ public:
     void run(PIMAGE_SECTION_HEADER new_section, bool obfuscate_entry_point);
 
     uint32_t get_added_size() const;
+
+    // Functions that were not skipped (no jumptable) after analysis
+    uint32_t get_flattened_function_count() const;
 
     struct instruction_t {
         int inst_id;

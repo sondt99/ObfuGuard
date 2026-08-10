@@ -3,6 +3,24 @@
 All notable changes to ObfuGuard are documented in this file.
 Format follows [Semantic Versioning](https://semver.org/).
 
+## [4.2.0] - 2026-08-10
+
+### Fixed (multi-agent review follow-up)
+- **CFF graph**: transition rewrite iterates all blocks (not shuffle `end()-1`); unconditional JMPs get dispatcher targets
+- **CFF x64 flags**: use `PUSHFQ`/`POPFQ` instead of 16-bit `pushf`/`popf`
+- **CFF memory safety**: bounds-check relocate/writes; fail if expanded code exceeds section; PDB offset/size bounds; `uint64` size estimate with hard fail on overflow/cap
+- **CFF jump expand**: shift only following instructions; fail closed on unmapped short conditionals
+- **CFF messaging**: save before success; report actually flattened count; entry-point metadata disabled until stub is wired
+- **PE**: fail on unmappable sections; checked section arithmetic; recompute `SizeOfImage` on save without underflow
+- **PDB**: hardened debug-directory walk, NUL-bounded CodeView path, sibling fallback, reject UNC; unload module on destroy
+- **Junk**: fail closed on out-of-range rel32/RIP-rel; refuse partial PDB-sized copies; JMP-first trampoline; volatile-only junk pool; section-limit user note; min size unified to `MIN_FUNCTION_SIZE`
+- **Product**: junk mode rejects 32-bit PE with clear error (docs aligned)
+- **Tests**: `match_check` compares exit codes + stdout; skip missing variants; nondeterministic allowlist
+
+### Performance / quality
+- Filter computes large-binary flag once per run
+- Blacklist search includes directory of running EXE (Windows)
+
 ## [4.1.0] - 2026-08-10
 
 ### Fixed

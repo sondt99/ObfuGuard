@@ -37,6 +37,10 @@ You can chain modes, but the second pass still needs accurate symbols/RVAs. A fi
 
 The dispatcher and encoding assume x64 conventions (`rax`, RIP-relative patterns). A PE32 port would be a separate engine.
 
+### Why was 32-bit junk rejected?
+
+Function discovery and `pe64` require PE32+. The CLI used to print “32-bit detected” and then fail inside discovery. Junk mode now **fails early** with a clear message. Full PE32 support needs a dedicated loader.
+
 ### Why are some functions not flattened?
 
 - Blacklisted / CRT-like names  
@@ -107,7 +111,7 @@ Copy Capstone, Keystone, LIEF, AsmJit, Zydis (and fmt/spdlog if needed) next to 
 
 ### “Control Flow Flattening only supports 64-bit”
 
-You passed a 32-bit PE to mode 1. Use mode 2 for x86, or rebuild the target as x64.
+You passed a 32-bit PE. Rebuild the target as x64 — both CFF and junk modes require PE32+ in this release.
 
 ### “No eligible functions”
 

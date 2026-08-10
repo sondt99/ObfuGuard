@@ -2,7 +2,7 @@
 
 **Windows PE binary obfuscation tool** for research and software protection.
 
-ObfuGuard transforms compiled 64-bit (and, for junk mode, 32-bit) Portable Executable files at the machine-code level. It increases reverse-engineering cost while aiming to preserve program behavior. It needs a matching **PDB** for function discovery.
+ObfuGuard transforms compiled **64-bit** Portable Executable files at the machine-code level. It increases reverse-engineering cost while aiming to preserve program behavior. It needs a matching **PDB** for function discovery.
 
 | | |
 |---|---|
@@ -18,7 +18,7 @@ ObfuGuard transforms compiled 64-bit (and, for junk mode, 32-bit) Portable Execu
 | Mode | What it does | PE arch |
 |------|----------------|---------|
 | **Control Flow Flattening (CFF)** | Basic blocks → shuffled dispatcher state machine (`rax` / flags preserved) | **64-bit only** |
-| **Junk Code + Trampoline** | Relocate functions to new sections; trampoline + neutral junk at original RVA | **32-bit and 64-bit** |
+| **Junk Code + Trampoline** | Relocate functions to new sections; trampoline + neutral junk at original RVA | **64-bit** |
 
 Also included:
 

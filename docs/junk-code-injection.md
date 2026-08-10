@@ -7,7 +7,7 @@ Junk injection increases instruction noise and scatters real logic into **new PE
 1. **Copied** (with relative fixups) into a dedicated section  
 2. **Hooked** at the original RVA with a **trampoline** (`jmp` to the new VA), padded with neutral junk / multi-byte NOPs  
 
-**Support:** 32-bit and 64-bit PE · LIEF + Capstone + Keystone · modules: `junkcode/`, `common/`
+**Support:** **64-bit PE only** (current builds) · LIEF + Capstone + Keystone · modules: `junkcode/`, `common/`
 
 PoC screenshots: `PoC/junkcode/`.
 

@@ -77,10 +77,10 @@ pe64::pe64(std::string binary_path) {
 
 		if (curr_section->SizeOfRawData == 0)
 			continue;
-		if (static_cast<size_t>(curr_section->PointerToRawData) + curr_section->SizeOfRawData > temp_buffer.size())
-			continue;
-		if (static_cast<size_t>(curr_section->VirtualAddress) + curr_section->SizeOfRawData > this->buffer.size())
-			continue;
+		if (static_cast<size_t>(curr_section->PointerToRawData) + curr_section->SizeOfRawData > temp_buffer.size() ||
+			static_cast<size_t>(curr_section->VirtualAddress) + curr_section->SizeOfRawData > this->buffer.size()) {
+			throw std::runtime_error("PE section raw data is out of bounds — refusing to load incomplete image");
+		}
 
 		memcpy(this->buffer.data() + curr_section->VirtualAddress, temp_buffer.data() + curr_section->PointerToRawData, curr_section->SizeOfRawData);
 
@@ -156,10 +156,15 @@ PIMAGE_SECTION_HEADER pe64::create_section(std::string name, uint32_t size, uint
 
 	memset(new_section_header->Name, 0, IMAGE_SIZEOF_SHORT_NAME);
 	memcpy(new_section_header->Name, name.c_str(), name.length());
+	const uint64_t vs = static_cast<uint64_t>(last_section->VirtualAddress) + last_section->Misc.VirtualSize;
+	const uint64_t raw_end = static_cast<uint64_t>(last_section->PointerToRawData) + last_section->SizeOfRawData;
+	if (vs > UINT32_MAX || raw_end > UINT32_MAX)
+		throw std::runtime_error("section layout arithmetic would overflow");
+
 	new_section_header->Misc.VirtualSize = align(size + sizeof(uint32_t) + 1, optional_header->SectionAlignment);
-	new_section_header->VirtualAddress = align(last_section->VirtualAddress + last_section->Misc.VirtualSize, optional_header->SectionAlignment);
+	new_section_header->VirtualAddress = align(static_cast<uint32_t>(vs), optional_header->SectionAlignment);
 	new_section_header->SizeOfRawData = align(size + sizeof(uint32_t) + 1, optional_header->FileAlignment);
-	new_section_header->PointerToRawData = align(last_section->PointerToRawData + last_section->SizeOfRawData, optional_header->FileAlignment);
+	new_section_header->PointerToRawData = align(static_cast<uint32_t>(raw_end), optional_header->FileAlignment);
 	new_section_header->Characteristics = characteristic;
 	new_section_header->PointerToRelocations = 0x0;
 	new_section_header->PointerToLinenumbers = 0x0;
@@ -168,13 +173,14 @@ PIMAGE_SECTION_HEADER pe64::create_section(std::string name, uint32_t size, uint
 
 	file_header->NumberOfSections += 1;
 	uint32_t old_size = optional_header->SizeOfImage;
-	optional_header->SizeOfImage = align(optional_header->SizeOfImage + size + sizeof(uint32_t) + 1 + sizeof(IMAGE_SECTION_HEADER), optional_header->SectionAlignment);
+	const uint64_t new_soi = static_cast<uint64_t>(optional_header->SizeOfImage) + size +
+		sizeof(uint32_t) + 1 + sizeof(IMAGE_SECTION_HEADER);
+	if (new_soi > ObfuGuard::MAX_PE_IMAGE_SIZE)
+		throw std::runtime_error("PE SizeOfImage would exceed maximum allowed size after adding section!");
+	optional_header->SizeOfImage = align(static_cast<uint32_t>(new_soi), optional_header->SectionAlignment);
 	// Grow headers only if the new section table entry needs more room
 	if (needed_headers > optional_header->SizeOfHeaders)
 		optional_header->SizeOfHeaders = needed_headers;
-
-	if (optional_header->SizeOfImage > ObfuGuard::MAX_PE_IMAGE_SIZE)
-		throw std::runtime_error("PE SizeOfImage would exceed maximum allowed size after adding section!");
 
 	// Grow VA image once; value-init zeros new tail, then copy old image
 	std::vector<uint8_t> new_buffer(optional_header->SizeOfImage, 0);
@@ -187,18 +193,37 @@ PIMAGE_SECTION_HEADER pe64::create_section(std::string name, uint32_t size, uint
 
 void pe64::save_to_disk(std::string path, PIMAGE_SECTION_HEADER new_section, uint32_t total_size) {
 
+	PIMAGE_NT_HEADERS nt = this->get_nt();
+	const uint32_t section_align = nt->OptionalHeader.SectionAlignment
+		? nt->OptionalHeader.SectionAlignment
+		: ObfuGuard::PE_SECTION_ALIGNMENT;
 
-	uint32_t size = this->align(total_size, this->get_nt()->OptionalHeader.SectionAlignment);
-
-	uint32_t original_size = new_section->Misc.VirtualSize;
+	uint32_t size = this->align(total_size, section_align);
 	new_section->SizeOfRawData = size;
 	new_section->Misc.VirtualSize = size;
 
-	if (size < original_size) {
-		this->get_nt()->OptionalHeader.SizeOfImage -= (original_size - size);
+	// Recompute SizeOfImage from last section end (never underflow via subtraction)
+	PIMAGE_SECTION_HEADER first = IMAGE_FIRST_SECTION(nt);
+	uint64_t max_end = 0;
+	for (int i = 0; i < nt->FileHeader.NumberOfSections; ++i) {
+		const uint64_t end = static_cast<uint64_t>(first[i].VirtualAddress) +
+			std::max(first[i].Misc.VirtualSize, first[i].SizeOfRawData);
+		if (end > max_end)
+			max_end = end;
+	}
+	uint32_t new_image_size = this->align(static_cast<uint32_t>(max_end), section_align);
+	if (new_image_size == 0 || new_image_size > ObfuGuard::MAX_PE_IMAGE_SIZE)
+		throw std::runtime_error("save_to_disk: invalid recomputed SizeOfImage");
+	nt->OptionalHeader.SizeOfImage = new_image_size;
+
+	if (static_cast<size_t>(new_image_size) > this->buffer.size()) {
+		// Grow buffer if last-section math needs more than current VA map
+		std::vector<uint8_t> grown(new_image_size, 0);
+		memcpy(grown.data(), this->buffer.data(), this->buffer.size());
+		this->buffer = std::move(grown);
 	}
 
-	uint32_t write_size = (std::min)(static_cast<uint32_t>(this->buffer.size()), this->get_nt()->OptionalHeader.SizeOfImage);
+	uint32_t write_size = (std::min)(static_cast<uint32_t>(this->buffer.size()), nt->OptionalHeader.SizeOfImage);
 
 	std::ofstream file_stream(path.c_str(), std::ios_base::out | std::ios_base::binary);
 	if (!file_stream)
