@@ -13,12 +13,24 @@ Format follows [Semantic Versioning](https://semver.org/).
 - **Blacklist file**: load `blacklist_default.txt` at runtime (with built-in fallback); remove duplicate JunkCodeManager blacklist tables
 - **obfuscate_entry_point**: honor the flag when encoding entry point into the CFF section
 - **Test scripts**: resolve paths relative to repo root; support `OBFUGUARD_EXE` env override
+- **CFF inst_id_index stale after flattening**: rebuild map after dispatcher inserts (correct jump fixups)
+- **CFF flattened CRT/runtime**: filter blacklisted/tiny functions before CFF (same rules as junk mode)
+- **Blacklist false positive**: no longer ban mid-name underscores (`sum_to_n` etc. stay injectable)
 
 ### Changed
 - Thread PDB sizes through trampoline inject APIs
 - Use `constants.h` for remaining magic numbers (junk scan/iteration limits, alignments, PDB load base, format buffer)
 - Unify `FuncToRVA::FunctionInfo` as alias of `ObfuGuard::FunctionInfo`
 - Update `docs/testing.md` inventory to match real `binary_test/` programs
+
+### Performance
+- **Junk multi-inject**: one LIEF layout build for all functions (was rebuild-per-function)
+- Reuse Capstone/Keystone engines across relocate/trampoline calls
+- CFF section size estimated from filtered functions (cap at 10MB) instead of always reserving 10MB
+- PDB symbol dedup uses `unordered_set` (was O(n) scan per symbol)
+- Faster maps: `inst_id_index` / runtime address track use `unordered_map`
+- PE load avoids full-file double-buffer copy; section grow uses move semantics
+- Quiet default junk logging (summary line per function instead of full hex dumps)
 
 ## [4.0.0] - 2026-08-02
 

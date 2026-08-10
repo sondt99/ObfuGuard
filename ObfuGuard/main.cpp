@@ -159,8 +159,9 @@ int mode_control_flow_flattening() {
     auto start_time = std::chrono::steady_clock::now();
 
     try {
-        // 2. Discover functions (shared step)
+        // 2. Discover + filter functions (same safety rules as junk mode)
         std::vector<pdbparser::sym_func> sym_functions;
+        uint32_t estimated_section_bytes = ObfuGuard::PE_SECTION_ALIGNMENT;
         {
             ObfuGuard::FunctionDiscovery discovery(binary_path);
             const auto& functions = discovery.get_functions();
@@ -170,8 +171,12 @@ int mode_control_flow_flattening() {
                 std::cout << "Successfully analyzed " << functions.size() << " functions.\n";
             }
 
-            // Convert to sym_func for CFF engine
-            for (const auto& f : functions) {
+            // Skip CRT/runtime and tiny functions — flattening them breaks the binary
+            auto eligible = ObfuGuard::filter_functions(functions, binary_path, ObfuGuard::MIN_FUNCTION_SIZE);
+            std::cout << "Eligible for CFF after filtering: " << eligible.size() << " function(s).\n";
+
+            // Convert to sym_func for CFF engine; estimate expanded code size (~4x with dispatcher)
+            for (const auto& f : eligible) {
                 pdbparser::sym_func sf;
                 sf.offset = f.pdb_offset;
                 sf.name = f.name;
@@ -179,17 +184,30 @@ int mode_control_flow_flattening() {
                 sf.obfuscate = true;
                 sf.cff_flattening = true;
                 sym_functions.push_back(sf);
+                estimated_section_bytes += f.size * 4u + 256u;
             }
         } // FunctionDiscovery goes out of scope here, releasing SymCleanup
 
+        if (sym_functions.empty()) {
+            std::cerr << "Error: No eligible functions remain for Control Flow Flattening.\n";
+            return 1;
+        }
+
+        // Cap section reservation: enough for expanded code, never exceed historical max
+        if (estimated_section_bytes < ObfuGuard::DEFAULT_SECTION_SIZE)
+            estimated_section_bytes = ObfuGuard::DEFAULT_SECTION_SIZE;
+        if (estimated_section_bytes > ObfuGuard::CFF_SECTION_SIZE)
+            estimated_section_bytes = ObfuGuard::CFF_SECTION_SIZE;
+
         // 3. CFF engine (needs its own pe64 for VA-mapped buffer)
         pe64 pe(binary_path);
-        auto new_section = pe.create_section(ObfuGuard::CFF_SECTION_NAME, ObfuGuard::CFF_SECTION_SIZE,
+        auto new_section = pe.create_section(ObfuGuard::CFF_SECTION_NAME, estimated_section_bytes,
             IMAGE_SCN_MEM_EXECUTE | IMAGE_SCN_MEM_READ | IMAGE_SCN_CNT_CODE);
 
         obfuscatecff obf(&pe);
         obf.create_functions(sym_functions);
-        std::cout << "Running Control Flow Flattening Mode\n";
+        std::cout << "Running Control Flow Flattening Mode (" << estimated_section_bytes
+            << " byte section reservation)\n";
         obf.run(new_section, true);
 
         // 4. Save

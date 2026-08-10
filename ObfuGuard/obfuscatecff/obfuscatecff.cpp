@@ -252,6 +252,14 @@ void obfuscatecff::relocate(PIMAGE_SECTION_HEADER new_section) {
 	this->total_size_used = used_memory + ObfuGuard::PE_SECTION_ALIGNMENT;
 }
 
+void obfuscatecff::rebuild_inst_id_index(function_t& func) {
+	func.inst_id_index.clear();
+	func.inst_id_index.reserve(func.instructions.size());
+	for (size_t i = 0; i < func.instructions.size(); ++i) {
+		func.inst_id_index[func.instructions[i].inst_id] = i;
+	}
+}
+
 // find instruction based on instruction id and function id
 bool obfuscatecff::find_instruction_by_id(int funcid, int instid, instruction_t* inst) const {
 
@@ -261,9 +269,16 @@ bool obfuscatecff::find_instruction_by_id(int funcid, int instid, instruction_t*
 	if (func == this->functions.end())
 		return false;
 	auto idx_it = func->inst_id_index.find(instid);
-	if (idx_it != func->inst_id_index.end()) {
+	if (idx_it != func->inst_id_index.end() && idx_it->second < func->instructions.size()) {
 		*inst = func->instructions[idx_it->second];
 		return true;
+	}
+	// Fallback linear scan (keeps correctness if index was not rebuilt after inserts)
+	for (const auto& instruction : func->instructions) {
+		if (instruction.inst_id == instid) {
+			*inst = instruction;
+			return true;
+		}
 	}
 	return false;
 }
@@ -554,8 +569,11 @@ void obfuscatecff::run(PIMAGE_SECTION_HEADER new_section, bool obfuscate_entry_p
 		if (func->has_jumptables)
 			continue;
 
-		if (func->cff_flattening)
+		if (func->cff_flattening) {
 			this->apply_control_flow_flattening(func);
+			// Inserts shift instruction indices — rebuild map before jump fixups
+			rebuild_inst_id_index(*func);
+		}
 	}
 
 	this->relocate(new_section);

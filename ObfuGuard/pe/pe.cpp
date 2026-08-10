@@ -6,6 +6,7 @@
 #include <stdexcept>
 #include <cstring>
 #include <algorithm>
+#include <utility>
 
 
 pe64::pe64(std::string binary_path) {
@@ -19,10 +20,10 @@ pe64::pe64(std::string binary_path) {
 	if(!file_stream)
 		throw std::runtime_error("couldn't open input binary!");
 
-	this->buffer.assign((std::istreambuf_iterator<char>(file_stream)),
+	// Read file once into raw buffer (file layout), then map into VA image
+	std::vector<uint8_t> temp_buffer(
+		(std::istreambuf_iterator<char>(file_stream)),
 		std::istreambuf_iterator<char>());
-
-	std::vector<uint8_t>temp_buffer = buffer;
 
 	if (temp_buffer.size() < sizeof(IMAGE_DOS_HEADER))
 		throw std::runtime_error("file too small to contain a valid PE header!");
@@ -48,31 +49,43 @@ pe64::pe64(std::string binary_path) {
 	if(nt->FileHeader.Machine != IMAGE_FILE_MACHINE_AMD64)
 		throw std::runtime_error("ObfuGuard doesn't support 32bit binaries!");
 
-	if (nt->OptionalHeader.SizeOfImage > ObfuGuard::MAX_PE_IMAGE_SIZE)
-		throw std::runtime_error("PE SizeOfImage exceeds maximum allowed size!");
+	if (nt->OptionalHeader.SizeOfImage == 0 || nt->OptionalHeader.SizeOfImage > ObfuGuard::MAX_PE_IMAGE_SIZE)
+		throw std::runtime_error("PE SizeOfImage is invalid or exceeds maximum allowed size!");
 
-	this->buffer.resize(nt->OptionalHeader.SizeOfImage);
+	if (nt->FileHeader.NumberOfSections > ObfuGuard::PE_MAX_SECTIONS)
+		throw std::runtime_error("PE has too many sections!");
 
-	memset(this->buffer.data(), 0, nt->OptionalHeader.SizeOfImage);
+	// Value-initialized (zeroed) VA-mapped image buffer — no separate memset
+	this->buffer.assign(nt->OptionalHeader.SizeOfImage, 0);
 
 	auto first_section = IMAGE_FIRST_SECTION(nt);
 
+	// Bounds-check section header table fits in the file buffer
+	const auto section_table_end = reinterpret_cast<const uint8_t*>(first_section)
+		+ static_cast<size_t>(nt->FileHeader.NumberOfSections) * sizeof(IMAGE_SECTION_HEADER);
+	if (section_table_end > temp_buffer.data() + temp_buffer.size())
+		throw std::runtime_error("PE section table is out of bounds!");
+
 	uint32_t headers_size = (std::min)(static_cast<uint32_t>(temp_buffer.size()), nt->OptionalHeader.SizeOfHeaders);
+	if (headers_size > this->buffer.size())
+		headers_size = static_cast<uint32_t>(this->buffer.size());
 	memcpy(this->buffer.data(), temp_buffer.data(), headers_size);
 
 	for (int i = 0; i < nt->FileHeader.NumberOfSections; i++) {
 
 		auto curr_section = &first_section[i];
 
-		if (curr_section->PointerToRawData + curr_section->SizeOfRawData > temp_buffer.size())
+		if (curr_section->SizeOfRawData == 0)
 			continue;
-		if (curr_section->VirtualAddress + curr_section->SizeOfRawData > this->buffer.size())
+		if (static_cast<size_t>(curr_section->PointerToRawData) + curr_section->SizeOfRawData > temp_buffer.size())
+			continue;
+		if (static_cast<size_t>(curr_section->VirtualAddress) + curr_section->SizeOfRawData > this->buffer.size())
 			continue;
 
 		memcpy(this->buffer.data() + curr_section->VirtualAddress, temp_buffer.data() + curr_section->PointerToRawData, curr_section->SizeOfRawData);
 
 	}
-	this->buffer_not_relocated = temp_buffer;
+	this->buffer_not_relocated = std::move(temp_buffer);
 }
 
 std::vector<uint8_t>* pe64::get_buffer() {
@@ -163,11 +176,11 @@ PIMAGE_SECTION_HEADER pe64::create_section(std::string name, uint32_t size, uint
 	if (optional_header->SizeOfImage > ObfuGuard::MAX_PE_IMAGE_SIZE)
 		throw std::runtime_error("PE SizeOfImage would exceed maximum allowed size after adding section!");
 
-	std::vector<uint8_t> new_buffer;
-	new_buffer.resize(optional_header->SizeOfImage);
-	memset(new_buffer.data(), 0, optional_header->SizeOfImage);
-	memcpy(new_buffer.data(), this->buffer.data(), old_size);
-	this->buffer = new_buffer;
+	// Grow VA image once; value-init zeros new tail, then copy old image
+	std::vector<uint8_t> new_buffer(optional_header->SizeOfImage, 0);
+	const size_t copy_n = (std::min)(static_cast<size_t>(old_size), new_buffer.size());
+	memcpy(new_buffer.data(), this->buffer.data(), copy_n);
+	this->buffer = std::move(new_buffer);
 
 	return this->get_section(name);
 }

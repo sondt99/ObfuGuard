@@ -156,7 +156,9 @@ static bool is_binary_large(const std::string& binary_path) {
 
 bool is_function_blacklisted(const std::string& func_name) {
     ensure_blacklist_loaded();
-    if (func_name.find_first_of("`_") != std::string::npos) return true;
+    // MSVC special/RTTI names contain backticks; CRT internals usually lead with '_'
+    // Do NOT ban mid-name underscores (would exclude user functions like sum_to_n).
+    if (func_name.find('`') != std::string::npos) return true;
     if (func_name.rfind('_', 0) == 0) return true;
     if (g_dangerous_names.count(func_name)) return true;
     for (const auto& prefix : DANGEROUS_PREFIXES) {

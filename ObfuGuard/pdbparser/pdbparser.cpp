@@ -9,6 +9,7 @@
 #include <string>
 #include <vector>
 #include <algorithm>
+#include <unordered_set>
 
 #pragma comment(lib, "dbghelp.lib")
 
@@ -109,13 +110,16 @@ std::vector<pdbparser::sym_func> pdbparser::parse_functions() {
     struct symbol_collector {
         DWORD64 base_address;
         std::vector<sym_func>* function_list;
+        std::unordered_set<uint32_t>* seen_offsets;
         int id_counter;
     };
 
     symbol_collector collector_ctx;
     collector_ctx.base_address = reinterpret_cast<DWORD64>(this->module_base);
     std::vector<sym_func> collected_functions;
+    std::unordered_set<uint32_t> seen_offsets;
     collector_ctx.function_list = &collected_functions;
+    collector_ctx.seen_offsets = &seen_offsets;
     collector_ctx.id_counter = 0;
 
     auto callback = [](PSYMBOL_INFO sym_info, ULONG /*size*/, PVOID user_data) -> BOOL {
@@ -130,17 +134,15 @@ std::vector<pdbparser::sym_func> pdbparser::parse_functions() {
             SymGetTypeInfo(GetCurrentProcess(), ctx->base_address, sym_info->Index, TI_GET_ADDRESSOFFSET, &fn_data.offset);
         }
 
-        auto exists = std::any_of(ctx->function_list->begin(), ctx->function_list->end(),
-            [&](const sym_func& existing) {
-                return existing.offset == fn_data.offset;
-            });
-
-        if (!exists) {
-            fn_data.id = ctx->id_counter++;
-            fn_data.name = sym_info->Name;
-            fn_data.size = sym_info->Size;
-            ctx->function_list->push_back(fn_data);
+        // O(1) duplicate check (was O(n) linear scan per symbol)
+        if (!ctx->seen_offsets->insert(fn_data.offset).second) {
+            return TRUE;
         }
+
+        fn_data.id = ctx->id_counter++;
+        fn_data.name = sym_info->Name;
+        fn_data.size = sym_info->Size;
+        ctx->function_list->push_back(fn_data);
 
         return TRUE;
         };

@@ -10,6 +10,7 @@
 #include <random>
 
 #include <keystone/keystone.h>
+#include <capstone/capstone.h>
 
 #include "../common/function_info.h"
 #include "../constants.h"
@@ -28,8 +29,14 @@ private:
     uint64_t image_base;
     bool is_64_bit;
     std::mt19937 rng_;
+    csh cs_handle_ = 0;
+    bool cs_ready_ = false;
+    ks_engine* ks_engine_ = nullptr;
+    bool verbose_ = false;
 
     void print_bytes(const std::string& prefix, const std::vector<uint8_t>& bytes);
+    bool ensure_disasm_engines();
+    void close_disasm_engines();
 
     bool get_and_relocate_original_function_code(
         uint64_t original_func_va,
@@ -46,6 +53,7 @@ private:
     void fill_remaining_space_with_nops(uint64_t address, size_t size);
     size_t patch_junk_region(ks_engine* ks, uint64_t start_address, size_t region_size, const LIEF::PE::Section& section);
     std::string generate_unique_section_name(const std::string& function_name, int index);
+    void compute_section_sizes(size_t content_size, uint32_t& out_raw, uint32_t& out_virtual) const;
 
 public:
     TrampolineInjector();

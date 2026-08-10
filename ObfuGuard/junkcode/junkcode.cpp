@@ -13,7 +13,6 @@
 #include <filesystem>
 
 #include <LIEF/LIEF.hpp>
-#include <capstone/capstone.h>
 #include <keystone/keystone.h>
 
 #include "../common/function_info.h"
@@ -24,7 +23,52 @@ TrampolineInjector::TrampolineInjector() : image_base(0), is_64_bit(false), rng_
 }
 
 TrampolineInjector::~TrampolineInjector() {
-    // binary_ptr cleanup
+    close_disasm_engines();
+}
+
+bool TrampolineInjector::ensure_disasm_engines() {
+    if (!cs_ready_) {
+        cs_mode mode = is_64_bit ? CS_MODE_64 : CS_MODE_32;
+        if (cs_open(CS_ARCH_X86, mode, &cs_handle_) != CS_ERR_OK) {
+            std::cerr << "Error: Failed to initialize Capstone." << std::endl;
+            return false;
+        }
+        cs_option(cs_handle_, CS_OPT_DETAIL, CS_OPT_ON);
+        cs_ready_ = true;
+    }
+    if (!ks_engine_) {
+        ks_mode mode = is_64_bit ? KS_MODE_64 : KS_MODE_32;
+        if (ks_open(KS_ARCH_X86, mode, &ks_engine_) != KS_ERR_OK) {
+            std::cerr << "Error: Failed to initialize Keystone." << std::endl;
+            return false;
+        }
+    }
+    return true;
+}
+
+void TrampolineInjector::close_disasm_engines() {
+    if (cs_ready_) {
+        cs_close(&cs_handle_);
+        cs_handle_ = 0;
+        cs_ready_ = false;
+    }
+    if (ks_engine_) {
+        ks_close(ks_engine_);
+        ks_engine_ = nullptr;
+    }
+}
+
+void TrampolineInjector::compute_section_sizes(size_t content_size, uint32_t& out_raw, uint32_t& out_virtual) const {
+    uint32_t file_alignment = binary_ptr->optional_header().file_alignment();
+    if (file_alignment == 0) file_alignment = ObfuGuard::PE_FILE_ALIGNMENT;
+    uint32_t section_alignment = binary_ptr->optional_header().section_alignment();
+    if (section_alignment == 0) section_alignment = ObfuGuard::PE_SECTION_ALIGNMENT;
+
+    out_raw = static_cast<uint32_t>(((content_size + file_alignment - 1) / file_alignment) * file_alignment);
+    size_t virt = ((content_size + section_alignment - 1) / section_alignment) * section_alignment;
+    virt = std::max(virt, static_cast<size_t>(ObfuGuard::DEFAULT_SECTION_SIZE));
+    virt = std::max(virt, static_cast<size_t>(out_raw));
+    out_virtual = static_cast<uint32_t>(virt);
 }
 
 // Print byte array for debugging
@@ -154,15 +198,9 @@ bool TrampolineInjector::get_and_relocate_original_function_code(
         return false;
     }
 
-    csh cs_handle; // Handle capstone
-
-    cs_mode capstone_mode = is_64_bit ? CS_MODE_64 : CS_MODE_32;
-    if (cs_open(CS_ARCH_X86, capstone_mode, &cs_handle) != CS_ERR_OK) {
-        std::cerr << "Error: Failed to initialize Capstone." << std::endl;
+    if (!ensure_disasm_engines()) {
         return false;
     }
-    // Enable detailed mode to get operand information
-    cs_option(cs_handle, CS_OPT_DETAIL, CS_OPT_ON);
 
     cs_insn* insn;
     size_t count = 0;
@@ -179,9 +217,12 @@ bool TrampolineInjector::get_and_relocate_original_function_code(
     }
     scan_limit = (std::min)(scan_limit, static_cast<size_t>(ObfuGuard::MAX_FUNC_SCAN_SIZE));
 
+    // Pre-size buffer to reduce reallocations during instruction appends
+    relocated_code_buffer.reserve(scan_limit + 16);
+
     // Disassemble within the scan limit (PDB size or first-RET fallback)
     while (current_copied_offset < scan_limit && relocated_code_buffer.size() < ObfuGuard::MAX_FUNC_SCAN_SIZE) {
-        count = cs_disasm(cs_handle, code_ptr + current_copied_offset, scan_limit - current_copied_offset, original_func_va + current_copied_offset, 1, &insn);
+        count = cs_disasm(cs_handle_, code_ptr + current_copied_offset, scan_limit - current_copied_offset, original_func_va + current_copied_offset, 1, &insn);
         if (count > 0) {
             // Do not start an instruction that would exceed the PDB-known span
             if (use_pdb_size && current_copied_offset + insn[0].size > scan_limit) {
@@ -294,12 +335,10 @@ bool TrampolineInjector::get_and_relocate_original_function_code(
         }
         else {
             std::cerr << "Warning: Capstone disassembly failed at VA 0x" << std::hex << (original_func_va + current_copied_offset)
-                << ". Error: " << cs_strerror(cs_errno(cs_handle)) << std::endl;
+                << ". Error: " << cs_strerror(cs_errno(cs_handle_)) << std::endl;
             break;
         }
     }
-
-    cs_close(&cs_handle); // Close Capstone engine
 
     // Check if any code was relocated
     if (relocated_code_buffer.empty()) {
@@ -313,7 +352,12 @@ bool TrampolineInjector::get_and_relocate_original_function_code(
         relocated_code_buffer.push_back(0xC3);
     }
 
-    determined_original_function_size = current_copied_offset;
+    // Prefer PDB size for original-region trampoline coverage when disasm succeeded fully
+    if (use_pdb_size && current_copied_offset >= known_function_size) {
+        determined_original_function_size = known_function_size;
+    } else {
+        determined_original_function_size = current_copied_offset;
+    }
     return true;
 }
 
@@ -567,14 +611,10 @@ size_t TrampolineInjector::patch_junk_region(ks_engine* ks, uint64_t start_addre
 
 // Create a JMP from original address to relocated code, insert junk to hide
 bool TrampolineInjector::create_trampoline(uint64_t original_func_va, uint64_t new_func_va, size_t original_size) {
-    ks_engine* ks;
-    ks_err ks_e;
-    ks_mode keystone_mode = is_64_bit ? KS_MODE_64 : KS_MODE_32;
-    ks_e = ks_open(KS_ARCH_X86, keystone_mode, &ks);
-    if (ks_e != KS_ERR_OK) {
-        std::cerr << "Error: Failed to initialize Keystone: " << ks_strerror(ks_e) << std::endl;
+    if (!ensure_disasm_engines() || !ks_engine_) {
         return false;
     }
+    ks_engine* ks = ks_engine_;
 
     // CHECK BOUNDS BEFORE STARTING
     const LIEF::PE::Section* original_section = nullptr;
@@ -592,7 +632,6 @@ bool TrampolineInjector::create_trampoline(uint64_t original_func_va, uint64_t n
 
         if (!original_section) {
             std::cerr << "Error: Can't find section containing VA: 0x" << std::hex << original_func_va << std::dec << std::endl;
-            ks_close(ks);
             return false;
         }
 
@@ -604,7 +643,6 @@ bool TrampolineInjector::create_trampoline(uint64_t original_func_va, uint64_t n
             std::cerr << "Error: The patch value (" << original_size << " bytes @0x" << std::hex
                 << original_func_va << ") is out of bounds of the section (limit: 0x"
                 << section_end_va << ")" << std::dec << std::endl;
-            ks_close(ks);
             return false;
         }
 
@@ -613,7 +651,6 @@ bool TrampolineInjector::create_trampoline(uint64_t original_func_va, uint64_t n
             std::cerr << "Error: Original function size (" << original_size
                 << " bytes) is too small for trampoline injection (minimum: "
                 << ObfuGuard::MIN_TRAMPOLINE_PATCH_SIZE << " bytes)" << std::endl;
-            ks_close(ks);
             return false;
         }
 
@@ -627,7 +664,6 @@ bool TrampolineInjector::create_trampoline(uint64_t original_func_va, uint64_t n
     }
     catch (const std::exception& e) {
         std::cerr << "Error during bounds checking: " << e.what() << std::endl;
-        ks_close(ks);
         return false;
     }
 
@@ -660,7 +696,6 @@ bool TrampolineInjector::create_trampoline(uint64_t original_func_va, uint64_t n
     if (relative_offset_64 < INT32_MIN || relative_offset_64 > INT32_MAX) {
         std::cerr << "Error: JMP target too far, cannot use relative JMP (offset: 0x"
             << std::hex << relative_offset_64 << ")" << std::dec << std::endl;
-        ks_close(ks);
         return false;
     }
 
@@ -671,139 +706,44 @@ bool TrampolineInjector::create_trampoline(uint64_t original_func_va, uint64_t n
     jmp_bytes[0] = 0xE9; // JMP rel32 opcode
     memcpy(jmp_bytes.data() + 1, &relative_offset, sizeof(int32_t));
 
-    // print_bytes("Manual JMP instruction: ", jmp_bytes);
-
     try {
         size_t jmp_size = 5; // E9 + 4 bytes
         size_t junk_after_size = original_size - junk_before_size - jmp_size;
-
-        /*std::cout << "Trampoline layout: " << junk_before_size << " bytes junk -> "
-            << jmp_size << " bytes JMP -> " << junk_after_size << " bytes junk" << std::endl;*/
 
         uint64_t current_address = original_func_va;
 
         // Patch junk code before JMP instruction
         current_address += patch_junk_region(ks, current_address, junk_before_size, *original_section);
 
-        // Patch JMP instruction at current address
-        /*std::cout << "Phase 2: Patching JMP at VA 0x" << std::hex << current_address
-            << " -> target 0x" << new_func_va << std::dec << std::endl;*/
-
-            // CHECK BOUNDS FOR JMP
+        // CHECK BOUNDS FOR JMP
         uint64_t jmp_patch_end = current_address + jmp_size;
         uint64_t section_start_va = image_base + original_section->virtual_address();
         uint64_t section_end_va = section_start_va + original_section->virtual_size();
 
         if (jmp_patch_end > section_end_va) {
             std::cerr << "Error: JMP patch would exceed section bounds." << std::endl;
-            ks_close(ks);
             return false;
         }
 
         binary_ptr->patch_address(current_address, jmp_bytes);
         current_address += jmp_size;
 
-        // Patch junk code after JMP instruction
+        // Patch junk code after JMP instruction (dead code, never executed)
         patch_junk_region(ks, current_address, junk_after_size, *original_section);
-        ks_close(ks);
         return true;
     }
     catch (const std::exception& e) {
         std::cerr << "LIEF Error patching trampoline: " << e.what() << std::endl;
-        ks_close(ks);
         return false;
     }
 }
 
 // Inject a function: relocate original code, create new section, insert trampoline
 bool TrampolineInjector::inject_function_trampoline(uint32_t function_rva, uint32_t function_size) {
-    uint64_t original_function_va = image_base + function_rva;
-
-    /*std::cout << "Step 1: Creating new section '.injcod'..." << std::endl;*/
-    if (!create_new_section(".injcod", ObfuGuard::DEFAULT_SECTION_SIZE)) {
-        std::cerr << "Error: Could not create new section." << std::endl;
-        return false;
-    }
-
-    /*std::cout << "Step 2: Copying and relocating original function..." << std::endl;*/
-    std::vector<uint8_t> relocated_code_bytes;
-    size_t original_function_processed_size = 0;
-
-    // First get relocated code before building (use PDB size when available)
-    if (!get_and_relocate_original_function_code(original_function_va, 0, relocated_code_bytes, original_function_processed_size, function_size)) {
-        std::cerr << "Error processing original function code." << std::endl;
-        return false;
-    }
-
-    if (relocated_code_bytes.empty()) {
-        std::cerr << "Error: Relocated code is empty." << std::endl;
-        return false;
-    }
-
-    // Find newly created section
-    LIEF::PE::Section* new_section_ptr = nullptr;
-    for (LIEF::PE::Section& sec : binary_ptr->sections()) {
-        if (sec.name() == ".injcod") {
-            new_section_ptr = &sec;
-            break;
-        }
-    }
-
-    if (!new_section_ptr) {
-        std::cerr << "Error: Could not find the created section." << std::endl;
-        return false;
-    }
-
-    // Update new section content first
-    uint32_t file_alignment = binary_ptr->optional_header().file_alignment();
-    if (file_alignment == 0) file_alignment = ObfuGuard::PE_FILE_ALIGNMENT;
-
-    uint32_t section_alignment = binary_ptr->optional_header().section_alignment();
-    if (section_alignment == 0) section_alignment = ObfuGuard::PE_SECTION_ALIGNMENT;
-
-    size_t final_raw_size = ((relocated_code_bytes.size() + file_alignment - 1) / file_alignment) * file_alignment;
-    size_t final_virtual_size = ((relocated_code_bytes.size() + section_alignment - 1) / section_alignment) * section_alignment;
-    final_virtual_size = std::max(final_virtual_size, static_cast<size_t>(ObfuGuard::DEFAULT_SECTION_SIZE));
-    final_virtual_size = std::max(final_virtual_size, final_raw_size);
-
-    new_section_ptr->size(static_cast<uint32_t>(final_raw_size));
-    new_section_ptr->virtual_size(static_cast<uint32_t>(final_virtual_size));
-    new_section_ptr->content(relocated_code_bytes);
-
-    // Rebuild binary layout
-    LIEF::PE::Builder temp_builder(*binary_ptr);
-    temp_builder.build_imports(false);
-    temp_builder.patch_imports(false);
-    try {
-        temp_builder.build();
-    }
-    catch (const std::exception& e) {
-        std::cerr << "LIEF Error during layout build: " << e.what() << std::endl;
-        return false;
-    }
-
-    // Get final address region after build
-    uint64_t new_function_base_va = image_base + new_section_ptr->virtual_address();
-    std::cout << "New section '.injcod' VA: 0x" << std::hex << new_function_base_va << std::dec << std::endl;
-
-    // Relocate original code to new address correctly
-    relocated_code_bytes.clear();
-    if (!get_and_relocate_original_function_code(original_function_va, new_function_base_va, relocated_code_bytes, original_function_processed_size, function_size)) {
-        std::cerr << "Error processing original function code with correct VA." << std::endl;
-        return false;
-    }
-
-    // Update new section content with relocated code
-    new_section_ptr->content(relocated_code_bytes);
-    print_bytes("Relocated code (" + std::to_string(relocated_code_bytes.size()) + " bytes): ", relocated_code_bytes);
-
-    /*std::cout << "Step 3: Creating trampoline JMP..." << std::endl;*/
-    if (!create_trampoline(original_function_va, new_function_base_va, original_function_processed_size)) {
-        std::cerr << "Error creating trampoline." << std::endl;
-        return false;
-    }
-
-    return true;
+    std::vector<uint32_t> rvas = { function_rva };
+    std::vector<std::string> names = { "func" };
+    std::vector<uint32_t> sizes = { function_size };
+    return inject_multiple_function_trampolines(rvas, names, sizes);
 }
 
 // Generate unique section names based on function name and index
@@ -830,7 +770,7 @@ std::string TrampolineInjector::generate_unique_section_name(const std::string& 
     return section_name;
 }
 
-// Function to handle multiple functions at once
+// Inject multiple functions with a single LIEF layout build (major speedup vs per-function rebuild)
 bool TrampolineInjector::inject_multiple_function_trampolines(const std::vector<uint32_t>& function_rvas,
     const std::vector<std::string>& function_names,
     const std::vector<uint32_t>& function_sizes) {
@@ -849,110 +789,125 @@ bool TrampolineInjector::inject_multiple_function_trampolines(const std::vector<
         return false;
     }
 
-    /*std::cout << "Processing " << function_rvas.size() << " function(s) for trampoline injection..." << std::endl;*/
+    if (!ensure_disasm_engines()) {
+        return false;
+    }
 
+    struct PendingInject {
+        uint32_t rva = 0;
+        std::string name;
+        size_t known_size = 0;
+        std::string section_name;
+        size_t original_processed_size = 0;
+        std::vector<uint8_t> code_bytes;
+    };
+
+    std::vector<PendingInject> pending;
+    pending.reserve(function_rvas.size());
+
+    // Phase 1: disassemble/relocate with provisional VA (0) and create all sections
     for (size_t i = 0; i < function_rvas.size(); ++i) {
-        uint32_t function_rva = function_rvas[i];
-        const std::string& function_name = function_names[i];
-        const size_t known_size = function_sizes.empty() ? 0 : function_sizes[i];
+        PendingInject item;
+        item.rva = function_rvas[i];
+        item.name = function_names[i];
+        item.known_size = function_sizes.empty() ? 0 : function_sizes[i];
+        item.section_name = generate_unique_section_name(item.name, static_cast<int>(i + 1));
 
-        /*std::cout << "\n--- Processing function " << (i + 1) << "/" << function_rvas.size()
-            << ": " << function_name << " (RVA: 0x" << std::hex << function_rva << std::dec << ") ---" << std::endl;*/
-
-        uint64_t original_function_va = image_base + function_rva;
-
-        // Create unique section name for this function
-        std::string section_name = generate_unique_section_name(function_name, static_cast<int>(i + 1));
-        /*std::cout << "Creating section: " << section_name << std::endl;*/
-
-        // Create new section for this function
-        if (!create_new_section(section_name, ObfuGuard::DEFAULT_SECTION_SIZE)) {
-            std::cerr << "Error: Could not create section " << section_name << " for function " << function_name << std::endl;
+        uint64_t original_function_va = image_base + item.rva;
+        if (!get_and_relocate_original_function_code(original_function_va, 0, item.code_bytes,
+                item.original_processed_size, item.known_size)) {
+            std::cerr << "Error processing original function code for " << item.name << std::endl;
+            return false;
+        }
+        if (item.code_bytes.empty()) {
+            std::cerr << "Error: Relocated code is empty for function " << item.name << std::endl;
             return false;
         }
 
-        // Copy and relocate original function code
-        std::vector<uint8_t> relocated_code_bytes;
-        size_t original_function_processed_size = 0;
-
-        // Get relocated code before building (prefer PDB size)
-        if (!get_and_relocate_original_function_code(original_function_va, 0, relocated_code_bytes, original_function_processed_size, known_size)) {
-            std::cerr << "Error processing original function code for " << function_name << std::endl;
+        if (!create_new_section(item.section_name, ObfuGuard::DEFAULT_SECTION_SIZE)) {
+            std::cerr << "Error: Could not create section " << item.section_name
+                << " for function " << item.name << std::endl;
             return false;
         }
 
-        if (relocated_code_bytes.empty()) {
-            std::cerr << "Error: Relocated code is empty for function " << function_name << std::endl;
-            return false;
-        }
-
-        // Find newly created section
         LIEF::PE::Section* new_section_ptr = nullptr;
         for (LIEF::PE::Section& sec : binary_ptr->sections()) {
-            if (sec.name() == section_name) {
+            if (sec.name() == item.section_name) {
                 new_section_ptr = &sec;
                 break;
             }
         }
-
         if (!new_section_ptr) {
-            std::cerr << "Error: Could not find created section " << section_name << std::endl;
+            std::cerr << "Error: Could not find created section " << item.section_name << std::endl;
             return false;
         }
 
-        // Update section content
-        uint32_t file_alignment = binary_ptr->optional_header().file_alignment();
-        if (file_alignment == 0) file_alignment = ObfuGuard::PE_FILE_ALIGNMENT;
+        uint32_t raw_size = 0, virt_size = 0;
+        compute_section_sizes(item.code_bytes.size(), raw_size, virt_size);
+        new_section_ptr->size(raw_size);
+        new_section_ptr->virtual_size(virt_size);
+        new_section_ptr->content(item.code_bytes);
 
-        uint32_t section_alignment = binary_ptr->optional_header().section_alignment();
-        if (section_alignment == 0) section_alignment = ObfuGuard::PE_SECTION_ALIGNMENT;
-
-        size_t final_raw_size = ((relocated_code_bytes.size() + file_alignment - 1) / file_alignment) * file_alignment;
-        size_t final_virtual_size = ((relocated_code_bytes.size() + section_alignment - 1) / section_alignment) * section_alignment;
-        final_virtual_size = std::max(final_virtual_size, static_cast<size_t>(ObfuGuard::DEFAULT_SECTION_SIZE));
-        final_virtual_size = std::max(final_virtual_size, final_raw_size);
-
-        new_section_ptr->size(static_cast<uint32_t>(final_raw_size));
-        new_section_ptr->virtual_size(static_cast<uint32_t>(final_virtual_size));
-        new_section_ptr->content(relocated_code_bytes);
-
-        // Build finalize layout
-        LIEF::PE::Builder temp_builder(*binary_ptr);
-        temp_builder.build_imports(false);
-        temp_builder.patch_imports(false);
-        try {
-            temp_builder.build();
-        }
-        catch (const std::exception& e) {
-            std::cerr << "LIEF Error during layout build for " << function_name << ": " << e.what() << std::endl;
-            return false;
-        }
-
-        // Get section VA address after build
-        uint64_t new_function_base_va = image_base + new_section_ptr->virtual_address();
-        // std::cout << "Section " << section_name << " VA: 0x" << std::hex << new_function_base_va << std::dec << std::endl;
-
-        // Relocate code again with correct VA address
-        relocated_code_bytes.clear();
-        if (!get_and_relocate_original_function_code(original_function_va, new_function_base_va, relocated_code_bytes, original_function_processed_size, known_size)) {
-            std::cerr << "Error processing original function code with correct VA for " << function_name << std::endl;
-            return false;
-        }
-
-        // Update section content with correctly relocated code
-        new_section_ptr->content(relocated_code_bytes);
-        // std::cout << "Relocated " << relocated_code_bytes.size() << " bytes for function " << function_name << std::endl;
-
-        // Create trampoline JMP
-        if (!create_trampoline(original_function_va, new_function_base_va, original_function_processed_size)) {
-            std::cerr << "Error creating trampoline for function " << function_name << std::endl;
-            return false;
-        }
-
-        // std::cout << "Successfully processed function: " << function_name << std::endl;
+        pending.push_back(std::move(item));
     }
 
-    /*std::cout << "\nCompleted processing all " << function_rvas.size() << " function(s)." << std::endl;*/
+    // Phase 2: one layout build for all new sections (assigns final VAs)
+    {
+        LIEF::PE::Builder layout_builder(*binary_ptr);
+        layout_builder.build_imports(false);
+        layout_builder.patch_imports(false);
+        try {
+            layout_builder.build();
+        }
+        catch (const std::exception& e) {
+            std::cerr << "LIEF Error during batch layout build: " << e.what() << std::endl;
+            return false;
+        }
+    }
+
+    std::cout << "Batch-injected layout for " << pending.size() << " function(s); applying relocations..." << std::endl;
+
+    // Phase 3: re-relocate with real VAs, update section content, install trampolines
+    for (auto& item : pending) {
+        LIEF::PE::Section* new_section_ptr = nullptr;
+        for (LIEF::PE::Section& sec : binary_ptr->sections()) {
+            if (sec.name() == item.section_name) {
+                new_section_ptr = &sec;
+                break;
+            }
+        }
+        if (!new_section_ptr) {
+            std::cerr << "Error: Lost section " << item.section_name << " after layout build." << std::endl;
+            return false;
+        }
+
+        uint64_t original_function_va = image_base + item.rva;
+        uint64_t new_function_base_va = image_base + new_section_ptr->virtual_address();
+
+        item.code_bytes.clear();
+        if (!get_and_relocate_original_function_code(original_function_va, new_function_base_va,
+                item.code_bytes, item.original_processed_size, item.known_size)) {
+            std::cerr << "Error re-relocating function " << item.name << std::endl;
+            return false;
+        }
+
+        new_section_ptr->content(item.code_bytes);
+
+        if (verbose_) {
+            print_bytes("Relocated " + item.name + " (" + std::to_string(item.code_bytes.size()) + " bytes): ",
+                item.code_bytes);
+        } else {
+            std::cout << "  " << item.name << " -> " << item.section_name
+                << " @ 0x" << std::hex << new_function_base_va << std::dec
+                << " (" << item.code_bytes.size() << " bytes)" << std::endl;
+        }
+
+        if (!create_trampoline(original_function_va, new_function_base_va, item.original_processed_size)) {
+            std::cerr << "Error creating trampoline for function " << item.name << std::endl;
+            return false;
+        }
+    }
+
     return true;
 }
 

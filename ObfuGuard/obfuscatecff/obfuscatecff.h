@@ -3,9 +3,9 @@
 #include "Zydis/Zydis.h"
 #include "../pdbparser/pdbparser.h"
 
-#include <map>
 #include <string>
 #include <unordered_map>
+#include <cstddef>
 #include <asmjit/asmjit.h>
 class obfuscatecff {
 private:
@@ -16,8 +16,8 @@ private:
         int func_id;
         int inst_index;
     };
-    // map tracking runtime address -> instruction
-    std::map<uint64_t, func_id_instr_id> runtime_addr_track;
+    // runtime address -> instruction (unordered for O(1) average lookup)
+    std::unordered_map<uint64_t, func_id_instr_id> runtime_addr_track;
 
     int instruction_id = 0;
     int function_iterator = 0;
@@ -42,6 +42,8 @@ private:
     void relocate(PIMAGE_SECTION_HEADER new_section);
 
     bool find_instruction_by_id(int funcid, int instid, instruction_t* inst) const;
+
+    static void rebuild_inst_id_index(function_t& func);
 
     bool fix_relative_jmps(function_t* func, int depth = 0);
 
@@ -115,7 +117,7 @@ public:
         int func_id;
         std::string name;
         std::vector<instruction_t> instructions;
-        std::map<int, uint64_t> inst_id_index;
+        std::unordered_map<int, size_t> inst_id_index; // inst_id -> index (rebuild after inserts)
         uint32_t offset;
         uint32_t size;
 
